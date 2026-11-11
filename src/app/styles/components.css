@@ -1,0 +1,361 @@
+/* ---------- 号码牌：所有面板的底 ---------- */
+.plate {
+  background: var(--foam);
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-m);
+  box-shadow: var(--drop);
+}
+
+/* 号码布四角的扣眼 */
+.plate--bib {
+  position: relative;
+  background-image:
+    radial-gradient(circle at 16px 16px, var(--ink) 0 4px, transparent 5px),
+    radial-gradient(circle at calc(100% - 16px) 16px, var(--ink) 0 4px, transparent 5px),
+    radial-gradient(circle at 16px calc(100% - 16px), var(--ink) 0 4px, transparent 5px),
+    radial-gradient(circle at calc(100% - 16px) calc(100% - 16px), var(--ink) 0 4px, transparent 5px);
+}
+
+/* ---------- 按钮 ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4em;
+  min-height: 56px;
+  padding: 0.35em 1.1em;
+  font-family: var(--font-display);
+  font-size: var(--t-lead);
+  line-height: 1.2;
+  color: var(--ink);
+  background: var(--foam);
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-m);
+  box-shadow: var(--drop);
+  cursor: pointer;
+  transition:
+    transform 0.08s,
+    box-shadow 0.08s;
+}
+
+.btn:active,
+.btn[data-air-pressed] {
+  transform: translate(4px, 4px);
+  box-shadow: var(--drop-pressed);
+}
+
+.btn--go {
+  color: #fff;
+  background: var(--coral);
+}
+
+/* 游戏中的按钮要大：举手悬停时光标不那么稳 */
+.btn--xl {
+  min-height: 104px;
+  padding: 0.3em 1.5em;
+  font-size: var(--t-big);
+  border-radius: var(--r-l);
+}
+
+.btn--icon {
+  min-width: 56px;
+  padding: 0.2em 0.6em;
+  font-family: var(--font-body);
+  font-size: var(--t-body);
+  font-weight: 700;
+}
+
+/* 举手悬停的光标停在上面时 */
+.btn[data-air-hover] {
+  outline: 5px solid var(--sun);
+  outline-offset: 4px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------- 泳道浮标绳：进度条 ---------- */
+.lane {
+  position: relative;
+  height: 18px;
+  border: var(--line) solid var(--ink);
+  border-radius: 999px;
+  overflow: hidden;
+  background: repeating-linear-gradient(90deg, #fff 0 20px, #dff4f8 20px 40px);
+}
+
+.lane__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: repeating-linear-gradient(90deg, var(--coral) 0 20px, #fff 20px 40px);
+  border-right: var(--line) solid var(--ink);
+}
+
+/* ---------- 居中的提示卡（加载、出错、站位引导） ---------- */
+.center-card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, calc(100vw - 32px));
+  padding: 32px 36px;
+  text-align: center;
+}
+
+.center-card h2 {
+  font-family: var(--font-display);
+  font-size: var(--t-title);
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+.center-card p {
+  margin-top: 12px;
+  color: var(--ink-soft);
+}
+
+.center-card .lane {
+  margin-top: 24px;
+}
+
+.center-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+  margin-top: 28px;
+}
+
+/* ---------- 首页 ---------- */
+.home__top {
+  position: absolute;
+  inset: 20px 24px auto 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.home__brand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand {
+  padding: 6px 16px;
+  font-family: var(--font-display);
+  font-size: var(--t-lead);
+}
+
+.home__nav {
+  display: flex;
+  gap: 12px;
+}
+
+.home__hero {
+  position: absolute;
+  left: clamp(20px, 5vw, 72px);
+  bottom: clamp(24px, 7vh, 72px);
+  max-width: min(680px, calc(100vw - 40px));
+}
+
+/* 游戏名：斜着的珊瑚色号码牌，像墙一样带着速度冲进来 */
+.title-plate {
+  display: inline-block;
+  padding: 0.08em 0.4em 0.16em;
+  font-family: var(--font-display);
+  font-size: var(--t-huge);
+  font-weight: 400;
+  line-height: 1.1;
+  color: #fff;
+  background: var(--coral);
+  border: 4px solid var(--ink);
+  border-radius: var(--r-l);
+  box-shadow: 10px 10px 0 var(--ink);
+  transform: rotate(-3deg);
+  transform-origin: left bottom;
+  text-shadow: 3px 3px 0 var(--ink);
+  -webkit-text-stroke: 1.5px var(--ink);
+}
+
+.home__lead {
+  margin: 28px 0 24px;
+  padding: 10px 18px;
+  display: inline-block;
+  font-size: var(--t-lead);
+  line-height: 1.4;
+}
+
+.home__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: center;
+}
+
+/* ---------- "正在用录制代替摄像头"的提示条 ---------- */
+.replay-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 6px 4px 14px;
+  font-size: var(--t-small);
+  background: var(--sun);
+}
+
+.replay-notice__off {
+  padding: 2px 10px;
+  background: #fff;
+  border: 2px solid var(--ink);
+  border-radius: var(--r-s);
+  cursor: pointer;
+}
+
+/* ---------- 设置面板 ---------- */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(20 33 61 / 0.55);
+}
+
+.dialog {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 28px 32px;
+}
+
+.dialog h2 {
+  font-family: var(--font-display);
+  font-size: var(--t-title);
+  font-weight: 400;
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 9em 1fr;
+  gap: 8px 16px;
+  align-items: center;
+  margin-top: 18px;
+}
+
+.field > span {
+  font-weight: 700;
+}
+
+.field small {
+  grid-column: 2;
+  color: var(--ink-soft);
+  font-size: var(--t-small);
+}
+
+.seg {
+  display: inline-flex;
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-s);
+  overflow: hidden;
+}
+
+.seg button {
+  padding: 6px 16px;
+  background: var(--foam);
+  border: 0;
+  border-right: var(--line) solid var(--ink);
+  cursor: pointer;
+}
+
+.seg button:last-child {
+  border-right: 0;
+}
+
+.seg button[aria-pressed='true'] {
+  color: #fff;
+  background: var(--ink);
+}
+
+.field select {
+  padding: 6px 10px;
+  background: var(--foam);
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-s);
+}
+
+/* "好了"一直贴在面板底部：选项多了、屏幕矮的时候，不用滚到最下面才找得到它 */
+.dialog__footer {
+  position: sticky;
+  bottom: -28px;
+  display: flex;
+  justify-content: flex-end;
+  margin: 28px -32px -28px;
+  padding: 14px 32px 28px;
+  background: var(--foam);
+  border-top: 2px solid rgb(20 33 61 / 0.15);
+}
+
+/* ---------- 摄像头小窗 ---------- */
+.pip {
+  position: absolute;
+  left: 20px;
+  bottom: 20px;
+  width: clamp(160px, 18vw, 280px);
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  padding: 0;
+  background: var(--ink);
+}
+
+.pip canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---------- 调试信息 ---------- */
+.debug {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: #fff;
+  background: rgb(20 33 61 / 0.75);
+  border-radius: var(--r-s);
+  white-space: pre;
+  pointer-events: none;
+}
+
+/* ---------- 举手悬停的光标 ---------- */
+.air-cursor {
+  position: fixed;
+  z-index: 60;
+  width: 76px;
+  height: 76px;
+  margin: -38px 0 0 -38px;
+  pointer-events: none;
+}
+
+.air-cursor svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(3px 3px 0 var(--ink));
+}
+
+.air-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  font-size: var(--t-small);
+  white-space: nowrap;
+}

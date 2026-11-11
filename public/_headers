@@ -1,0 +1,4 @@
+# 构建产物的文件名带内容哈希，可以放心长期缓存。
+# 识别模型和 wasm（/models、/mediapipe）的文件名是固定的，不在这里：它们每次用之前向服务器确认一下有没有变。
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

@@ -1,0 +1,39 @@
+/*
+ * 视觉基调：晴天海上的闯关节目。
+ * 母题是"号码布"和"泳道"——白色号码牌、深海军蓝粗描边、硬朗的偏移投影；
+ * 进度条是泳道浮标绳，命数是救生圈。颜色各有含义，不混用。
+ */
+:root {
+  /* 深海：文字和所有描边 */
+  --ink: #14213d;
+  --ink-soft: #4a5a7a;
+  /* 池水：中性的底色 */
+  --sea: #0fb5c9;
+  --deep: #0a7ea4;
+  /* 浪花：号码牌的底 */
+  --foam: #f7fdff;
+  /* 浮标黄：得分、星星 */
+  --sun: #ffc531;
+  /* 救生圈红：撞墙、主按钮 */
+  --coral: #ff5d4a;
+  /* 薄荷绿：摆对了 */
+  --mint: #3ddc97;
+
+  --font-display: 'ZCOOL QingKe HuangYou', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
+  --font-body: 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif;
+
+  --line: 3px;
+  --drop: 6px 6px 0 var(--ink);
+  --drop-pressed: 2px 2px 0 var(--ink);
+  --r-s: 10px;
+  --r-m: 18px;
+  --r-l: 28px;
+
+  /* 字号阶梯（比例约 1.333），玩的时候人站在两三米外，所以整体偏大 */
+  --t-small: 1rem;
+  --t-body: 1.25rem;
+  --t-lead: 1.667rem;
+  --t-title: 2.222rem;
+  --t-big: 2.963rem;
+  --t-huge: clamp(3.4rem, 9vw, 7rem);
+}

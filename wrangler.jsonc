@@ -1,0 +1,18 @@
+{
+  // Cloudflare Workers 静态资源部署：这个站点是纯前端，没有服务端代码。
+  // 发布的是 `npm run build` 生成的 dist/ 目录——里面除了页面，还有识别模型和 MediaPipe 的 wasm
+  // （它们由 `npm run setup` 准备到 public/ 下，不入库；`npm run deploy` 会先确认它们在）。
+  // 摄像头画面只在访问者自己的浏览器里识别，这个 Worker 只负责把文件发出去。
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "qianglaile",
+  "compatibility_date": "2026-11-11",
+  "assets": {
+    "directory": "./dist"
+  },
+  "routes": [
+    {
+      "pattern": "qianglaile.dengjiabei.cn",
+      "custom_domain": true
+    }
+  ]
+}

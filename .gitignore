@@ -1,0 +1,11 @@
+node_modules
+dist
+e2e-out
+.superpowers
+.wrangler
+
+# 由 npm run setup 生成，不入库
+public/models
+public/mediapipe
+tests/fixtures/photos
+*.mjpeg

@@ -1,0 +1,363 @@
+/* 「别撞墙！」的 HUD：像体育转播的字幕，浮在 3D 舞台上。人站在三米外看，所以字大、字少。 */
+.hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font-family: var(--font-display);
+}
+
+.hud__top {
+  position: absolute;
+  inset: 16px 20px auto 20px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.hud__col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hud__col--right {
+  align-items: flex-end;
+}
+
+/* 命：救生圈 */
+.lives {
+  display: flex;
+  gap: 8px;
+}
+
+.life {
+  width: 50px;
+  height: 50px;
+  filter: drop-shadow(3px 3px 0 var(--ink));
+  transition:
+    opacity 0.3s,
+    transform 0.3s;
+}
+
+.life--lost {
+  opacity: 0.22;
+  transform: scale(0.82);
+  filter: grayscale(1);
+}
+
+/* 第几关 + 本关进度 */
+.level {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  font-size: var(--t-lead);
+  line-height: 1.2;
+}
+
+.level .lane {
+  width: 130px;
+  height: 14px;
+}
+
+/* 分数 */
+.score {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 18px 6px;
+  font-size: var(--t-big);
+  line-height: 1.15;
+}
+
+.score small {
+  font-size: var(--t-body);
+}
+
+.combo {
+  padding: 2px 14px;
+  font-size: var(--t-lead);
+  background: var(--sun);
+  transform: rotate(3deg);
+}
+
+/* 右上角的"暂停""设置"。整个 HUD 不拦鼠标（免得挡住底下的东西），所以能点的地方要单独打开 */
+.hud__buttons {
+  display: flex;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+/* 底部正中：这面墙要摆什么 */
+.pose {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(560px, 52vw);
+}
+
+.pose__name {
+  padding: 2px 30px 8px;
+  font-size: var(--t-big);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.pose__hint {
+  padding: 2px 18px 4px;
+  font-size: var(--t-lead);
+  line-height: 1.3;
+  color: #fff;
+  background: var(--coral);
+  white-space: nowrap;
+}
+
+.pose__hint--ok {
+  color: var(--ink);
+  background: var(--mint);
+}
+
+.pose .lane {
+  width: 100%;
+}
+
+/* 右下角：契合度圆环，中间是倒计时 */
+.meter {
+  position: absolute;
+  right: 22px;
+  bottom: 22px;
+  width: 148px;
+  height: 148px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+
+.meter svg {
+  position: absolute;
+  inset: 8px;
+  transform: rotate(-90deg);
+}
+
+.meter__time {
+  position: relative;
+  font-size: var(--t-big);
+  line-height: 1;
+}
+
+.meter__label {
+  position: absolute;
+  left: 50%;
+  top: -34px;
+  transform: translateX(-50%);
+  padding: 0 12px 2px;
+  font-size: var(--t-body);
+  white-space: nowrap;
+}
+
+/* ---------- 正中的大横幅：过关 / 撞墙 / 升关 / 倒计时 ---------- */
+.banner {
+  position: absolute;
+  left: 50%;
+  top: 26%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  transform: translate(-50%, -50%);
+  animation: banner-slam 1.5s both;
+}
+
+.banner__text {
+  padding: 0 0.35em 0.08em;
+  font-size: var(--t-huge);
+  line-height: 1.15;
+  color: #fff;
+  border: 4px solid var(--ink);
+  border-radius: var(--r-l);
+  box-shadow: 10px 10px 0 var(--ink);
+  text-shadow: 3px 3px 0 var(--ink);
+  -webkit-text-stroke: 1.5px var(--ink);
+  white-space: nowrap;
+  transform: rotate(-3deg);
+}
+
+.banner--perfect .banner__text {
+  background: var(--sun);
+}
+
+.banner--pass .banner__text {
+  background: var(--mint);
+}
+
+.banner--hit .banner__text {
+  background: var(--coral);
+}
+
+.banner--level .banner__text {
+  background: var(--sea);
+}
+
+.banner--count .banner__text {
+  min-width: 1.6em;
+  text-align: center;
+  background: var(--ink);
+  -webkit-text-stroke: 0;
+  text-shadow: none;
+  transform: none;
+  animation: none;
+}
+
+.banner--count {
+  animation-duration: 0.9s;
+}
+
+.banner__sub {
+  padding: 2px 20px 5px;
+  font-size: var(--t-title);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+@keyframes banner-slam {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.7);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+  18% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* ---------- 站位引导 ---------- */
+.framing {
+  position: absolute;
+  left: 50%;
+  bottom: 32px;
+  transform: translateX(-50%);
+  width: min(640px, calc(100vw - 32px));
+  padding: 18px 28px 22px;
+  text-align: center;
+  font-family: var(--font-display);
+}
+
+.framing__text {
+  font-size: var(--t-big);
+  line-height: 1.25;
+}
+
+.framing__note {
+  margin-top: 6px;
+  font-family: var(--font-body);
+  font-size: var(--t-body);
+  color: var(--ink-soft);
+}
+
+.framing .lane {
+  margin-top: 16px;
+}
+
+/* ---------- 暂停、结算 ---------- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(20 33 61 / 0.35);
+}
+
+.panel {
+  width: min(760px, 100%);
+  padding: 30px 40px 36px;
+  text-align: center;
+  font-family: var(--font-display);
+}
+
+.panel h2 {
+  font-size: var(--t-huge);
+  font-weight: 400;
+  line-height: 1.15;
+}
+
+.panel__note {
+  margin-top: 6px;
+  font-family: var(--font-body);
+  color: var(--ink-soft);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stats li {
+  padding: 8px 6px 12px;
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-m);
+  background: #fff;
+}
+
+.stats b {
+  display: block;
+  font-size: var(--t-big);
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.stats span {
+  font-family: var(--font-body);
+  font-size: var(--t-small);
+  color: var(--ink-soft);
+}
+
+.stars {
+  margin-top: 16px;
+  font-size: var(--t-lead);
+  color: var(--ink);
+}
+
+.stars i {
+  font-style: normal;
+  color: #e6a400;
+  -webkit-text-stroke: 1px var(--ink);
+}
+
+.panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 22px;
+  margin-top: 30px;
+}
+
+@media (max-width: 760px) {
+  .meter {
+    transform: scale(0.72);
+    transform-origin: right bottom;
+  }
+  .pose {
+    width: 60vw;
+  }
+}
