@@ -43,6 +43,8 @@ export function useRoute(): Route {
  *   e2e=1      把内部状态挂到 window.__mw 供测试脚本读取
  *   worker=0   识别不放进 Worker，留在主线程（对比性能、排查问题用）
  *   only=<id>  只出这一面墙，反复练（姿势实验室的"试试这面墙"用的就是它）
+ *   level=12   从第 12 关开始（1～15；预览、测试后面的关卡用）
+ *   players=2  双人游戏（首页的"双人游戏"按钮带的就是它）
  */
 export interface Flags {
   sim: 'off' | 'auto' | 'wrong' | 'manual';
@@ -53,10 +55,16 @@ export interface Flags {
   worker: boolean;
   /** 只出这一面墙（一个人形姿势的 id，内置的或自己存的；几何洞不行）；null 表示正常闯关 */
   only: string | null;
+  /** 从第几关开始（1～15 的整数）；null 表示从第 1 关开始 */
+  level: number | null;
+  /** 几个人玩：只有写了 players=2 才是 2 */
+  players: 1 | 2;
 }
 
 /** 墙的 id 长什么样：字母数字开头，后面可以有连字符和 ~，最多 40 个字符 */
 const WALL_ID = /^[a-z0-9][a-z0-9~-]{0,39}$/i;
+/** 一共十五关（和 games/wall/tuning.ts 的 COMMON.levels 是同一个数；这里不引它，免得路由拖上游戏的代码） */
+const LAST_LEVEL = 15;
 
 /** 传入 location.search，或者带查询串的 hash（'#/play/wall?sim=auto'）。 */
 export function readFlags(input: string): Flags {
@@ -65,6 +73,8 @@ export function readFlags(input: string): Flags {
   const sim = q.get('sim');
   const seed = Number.parseInt(q.get('seed') ?? '', 10);
   const only = q.get('only') ?? '';
+  const levelText = q.get('level') ?? '';
+  const level = /^\d{1,2}$/.test(levelText) ? Number(levelText) : 0;
   return {
     sim: sim === 'auto' || sim === '1' ? 'auto' : sim === 'wrong' || sim === 'manual' ? sim : 'off',
     seed: Number.isFinite(seed) ? seed : null,
@@ -73,6 +83,8 @@ export function readFlags(input: string): Flags {
     fast: on('fast'),
     worker: q.get('worker') !== '0' && q.get('worker') !== 'false',
     only: WALL_ID.test(only) ? only : null,
+    level: level >= 1 && level <= LAST_LEVEL ? level : null,
+    players: q.get('players') === '2' ? 2 : 1,
   };
 }
 

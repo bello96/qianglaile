@@ -21,6 +21,9 @@ export interface WallBounds {
 /** 墙的尺寸：宽 4.2 米，高 3 米，底边贴地。比浮台宽，所以绕不过去。 */
 export const WALL_BOUNDS: WallBounds = { x0: -2.1, x1: 2.1, y0: 0, y1: 3.0 };
 
+/** 双人的墙：两个人并排站，墙加宽 1 米（浮台也跟着加宽，见 scene/stage.ts）。 */
+export const DUO_BOUNDS: WallBounds = { x0: -2.6, x1: 2.6, y0: 0, y1: 3.0 };
+
 export interface WallField {
   /** 格点数 */
   nx: number;

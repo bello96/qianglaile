@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { Body } from '../../engine/body/bodyModel';
 import { LM } from '../../engine/body/landmarks';
 import type { Engine } from '../useEngine';
 
@@ -27,14 +28,20 @@ export function drawCamera(g: CanvasRenderingContext2D, w: number, h: number, en
     g.fillRect(0, 0, w, h);
   }
 
-  const body = engine.tracker.state.body;
   // 模拟玩家没有画面，只能看骨架，所以总是画
-  if (!body || !(skeleton || !video)) return;
+  if (!(skeleton || !video)) return;
+  // 双人：两位的骨架都画，2 号用紫色（和他的小人一个颜色）
+  drawSkeleton(g, w, h, engine.tracker.state.body, '#3ddc97');
+  if (engine.mate) drawSkeleton(g, w, h, engine.mate.state.body, '#b48cff');
+}
+
+function drawSkeleton(g: CanvasRenderingContext2D, w: number, h: number, body: Body | null, colour: string): void {
+  if (!body) return;
   const pts = body.image;
   const at = (i: number): [number, number] => [pts[i].x * w, pts[i].y * h];
   g.lineCap = 'round';
   g.lineWidth = Math.max(2, w / 110);
-  g.strokeStyle = '#3ddc97';
+  g.strokeStyle = colour;
   for (const [a, b] of BONES) {
     if (pts[a].v < 0.5 || pts[b].v < 0.5) continue;
     g.beginPath();

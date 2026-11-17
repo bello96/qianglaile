@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { NEUTRAL, poseToSkeleton, type JointName, type Skeleton } from '../../../engine/body/pose';
 import type { BodyProfile } from '../../../engine/body/profile';
 import type { PartId } from '../bodyShape';
+import { Ragdoll } from '../fx/ragdoll';
 import { capsuleTransform } from './avatarMath';
 import { COLORS, WATER_Y } from './stage';
 
@@ -11,6 +12,9 @@ import { COLORS, WATER_Y } from './stage';
  * 这些圆柱和球的粗细，和判定用的身体轮廓（bodyShape.ts）是同一组半径。
  *
  * 我们总是从背后看他，所以给他背上缝了一块号码布。
+ *
+ * 平时他照着玩家的骨架摆。被墙撞到之后，骨架改由布娃娃（fx/ragdoll.ts）接管：
+ * 被墙推着走、四肢甩开、翻下台子、落水；然后闪烁着回到台上，重新跟着玩家。
  */
 export type PartTint = 'idle' | 'ok' | 'bad';
 
@@ -58,7 +62,7 @@ const BALLS: Ball[] = [
   { part: 'footR', at: 'toeR', radius: (p) => p.r.foot, color: SKIN },
 ];
 
-function bibTexture(): THREE.Texture {
+function bibTexture(text: string): THREE.Texture {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
   const g = c.getContext('2d')!;
@@ -71,19 +75,25 @@ function bibTexture(): THREE.Texture {
   g.font = '900 84px system-ui, sans-serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.fillText('7', 64, 70);
+  g.fillText(text, 64, 70);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
 
+/** none 跟着玩家 · flying 被撞飞（布娃娃）· sunk 在水里 · landing 闪烁着回到台上 */
 type Flight = 'none' | 'flying' | 'sunk' | 'landing';
+
+/** 落水之后在水里泡多久再回台上（秒） */
+const SUNK_SEC = 0.75;
+/** 原地蹦一下：多高、多久 */
+const HOP = { height: 0.34, sec: 0.42 };
 
 export class Avatar {
   /** 加进场景的就是它 */
   readonly group = new THREE.Group();
 
-  /** 跟着髋走；被撞飞时整体平移、翻滚的也是它 */
+  /** 跟着髋走 */
   private readonly inner = new THREE.Group();
   private readonly shadow: THREE.Mesh;
   private readonly bib: THREE.Mesh;
@@ -93,19 +103,30 @@ export class Avatar {
   private readonly materials = new Map<PartId, { mat: THREE.MeshStandardMaterial; base: number }[]>();
   private readonly cylinder = new THREE.CylinderGeometry(1, 1, 1, 14, 1);
   private readonly sphere = new THREE.SphereGeometry(1, 18, 14);
+  private readonly deck: { halfW: number; halfD: number };
 
   private profile: BodyProfile;
   private hip = new THREE.Vector3(0, 0.82, 0);
+  /** 玩家最近一次的骨架（被撞飞的时候不照它摆，但要记着：布娃娃从它开始，回台上之后也回到它） */
+  private live: Skeleton;
 
   private flight: Flight = 'none';
   private flightT = 0;
-  private readonly offset = new THREE.Vector3();
-  private readonly velocity = new THREE.Vector3();
-  private readonly spin = new THREE.Vector3();
+  private doll: Ragdoll | null = null;
+  /** 回到台上那一下的回弹、原地蹦，都是整个人往上抬 */
+  private lift = 0;
+  private hopT = -1;
 
-  constructor(profile: BodyProfile) {
+  /**
+   * look：衣服的颜色和背上的号码（单人是蓝衣 7 号；双人的两位各有各的，好分清谁是谁）；
+   * deck：浮台的半宽、半深（布娃娃要知道台子有多大）。
+   */
+  constructor(profile: BodyProfile, look: { suit?: number; bib?: string; deck?: { halfW: number; halfD: number } } = {}) {
     this.profile = profile;
-    const material = (part: PartId, color: number): THREE.MeshStandardMaterial => {
+    this.deck = look.deck ?? { halfW: 1.8, halfD: 0.85 };
+    const material = (part: PartId, wanted: number): THREE.MeshStandardMaterial => {
+      // 上面的表里衣服一律写的是默认的蓝；这位要是另一种颜色，在这里换
+      const color = wanted === SUIT ? (look.suit ?? SUIT) : wanted;
       const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.55 });
       const list = this.materials.get(part) ?? [];
       list.push({ mat, base: color });
@@ -125,7 +146,7 @@ export class Avatar {
     this.cap = new THREE.Mesh(new THREE.SphereGeometry(1, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), new THREE.MeshStandardMaterial({ color: COLORS.sun, roughness: 0.5 }));
     this.cap.castShadow = true;
     // 号码布：贴在后背（朝 +z，也就是朝观众）
-    this.bib = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: bibTexture() }));
+    this.bib = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: bibTexture(look.bib ?? '7') }));
     this.inner.add(this.cap, this.bib);
 
     // 脚下的一团影子：没有阴影贴图时也能看出人站在台子上
@@ -134,15 +155,22 @@ export class Avatar {
     this.shadow.position.y = 0.006;
 
     this.group.add(this.inner, this.shadow);
-    this.pose(poseToSkeleton(NEUTRAL, profile));
+    this.live = poseToSkeleton(NEUTRAL, profile);
+    this.place(this.live);
   }
 
   setProfile(p: BodyProfile): void {
     this.profile = p;
   }
 
-  /** 把小人摆成这副骨架的样子。 */
+  /** 玩家现在的骨架。平时小人就照它摆；被撞飞、在水里的时候先记着。 */
   pose(sk: Skeleton): void {
+    this.live = sk;
+    if (!this.doll) this.place(sk);
+  }
+
+  /** 把小人摆成这副骨架的样子。 */
+  private place(sk: Skeleton): void {
     const p = this.profile;
     const h = sk.hipC;
     this.hip.set(h.x, h.y, h.z);
@@ -163,7 +191,11 @@ export class Avatar {
 
     const head = rel('head');
     const neck = rel('neck');
-    this.cap.position.set(head.x, head.y + p.headR * 0.12, head.z);
+    // 帽子顺着脖子到头的方向扣（被撞翻的时候跟着头转）
+    const tilt = capsuleTransform(neck, head);
+    this.cap.quaternion.set(...tilt.quaternion);
+    const up = tilt.length > 1e-6 ? { x: (head.x - neck.x) / tilt.length, y: (head.y - neck.y) / tilt.length, z: (head.z - neck.z) / tilt.length } : { x: 0, y: 1, z: 0 };
+    this.cap.position.set(head.x + up.x * p.headR * 0.12, head.y + up.y * p.headR * 0.12, head.z + up.z * p.headR * 0.12);
     this.cap.scale.setScalar(p.headR * 1.08);
 
     // 号码布跟着脊柱倾斜，贴在后背外面一点
@@ -190,50 +222,60 @@ export class Avatar {
     return this.flight !== 'none';
   }
 
-  /** 被墙撞飞：向观众方向抛出去，翻滚着落水。 */
+  /** 被墙撞到：从现在的姿势开始变成布娃娃，向后（朝观众）倒下去。 */
   knock(): void {
+    this.doll = new Ragdoll(this.live, { deckHalfW: this.deck.halfW, deckHalfD: this.deck.halfD, waterY: WATER_Y });
+    // 墙拍在上半身：人往后仰着被带出去，稍微偏一点、转一点，每次不太一样
+    this.doll.kick({ x: (Math.random() - 0.5) * 1.6, y: 3.4 + Math.random() * 0.9, z: 1.1 + Math.random() * 0.6 }, 1.4 + Math.random() * 1.4);
     this.flight = 'flying';
     this.flightT = 0;
-    this.offset.set(0, 0, 0);
-    this.velocity.set((Math.random() - 0.5) * 1.4, 4.4, 3.6);
-    this.spin.set(3 + Math.random() * 3, (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 5);
+    this.hopT = -1;
+    this.lift = 0;
   }
 
-  /** 每帧调用。落水的那一帧返回落水点，供水花和音效使用。 */
-  update(dt: number): { splash: { x: number; z: number } | null } {
+  /** 过关了，原地蹦一下。正被撞飞的时候不蹦。 */
+  hop(): void {
+    if (this.flight === 'none') this.hopT = 0;
+  }
+
+  /**
+   * 每帧调用。wallZ：墙面现在在哪（撞墙之后墙还推着人走一段）；没有墙就传 null。
+   * 落水的那一帧返回落水点，供水花和音效使用。
+   */
+  update(dt: number, wallZ: number | null = null): { splash: { x: number; z: number } | null } {
     let splash: { x: number; z: number } | null = null;
     this.flightT += dt;
 
-    if (this.flight === 'flying') {
-      this.velocity.y -= 13 * dt;
-      this.offset.addScaledVector(this.velocity, dt);
-      this.inner.rotation.x += this.spin.x * dt;
-      this.inner.rotation.y += this.spin.y * dt;
-      this.inner.rotation.z += this.spin.z * dt;
-      if (this.hip.y + this.offset.y < WATER_Y) {
-        splash = { x: this.hip.x + this.offset.x, z: this.hip.z + this.offset.z };
+    if (this.doll && (this.flight === 'flying' || this.flight === 'sunk')) {
+      this.doll.step(dt, this.flight === 'flying' ? wallZ : null);
+      const sk = this.doll.skeleton();
+      this.place(sk);
+      if (this.flight === 'flying' && (this.doll.sunk || this.flightT > 4)) {
+        // 正常一秒左右就落水了；万一卡在台子上，过几秒也算数，不然他回不来
+        splash = { x: sk.hipC.x, z: sk.hipC.z };
         this.flight = 'sunk';
         this.flightT = 0;
-      }
-    } else if (this.flight === 'sunk') {
-      // 在水下再沉一小会儿，然后回到台上
-      this.offset.y -= 1.2 * dt;
-      if (this.flightT > 0.75) {
+      } else if (this.flight === 'sunk' && this.flightT > SUNK_SEC) {
+        this.doll = null;
         this.flight = 'landing';
         this.flightT = 0;
-        this.inner.rotation.set(0, 0, 0);
+        this.place(this.live);
       }
     } else if (this.flight === 'landing') {
       // 从上方落回台面，带一点回弹；同时闪烁，表示"刚复活"
       const k = Math.min(1, this.flightT / 0.45);
-      const bounce = Math.abs(Math.cos(k * Math.PI * 1.5)) * (1 - k);
-      this.offset.set(0, bounce * 0.9, 0);
+      this.lift = Math.abs(Math.cos(k * Math.PI * 1.5)) * (1 - k) * 0.9;
       this.inner.visible = Math.floor(this.flightT * 14) % 2 === 0 || k >= 1;
       if (this.flightT > 0.9) {
         this.flight = 'none';
-        this.offset.set(0, 0, 0);
+        this.lift = 0;
         this.inner.visible = true;
       }
+    } else if (this.hopT >= 0) {
+      this.hopT += dt;
+      const k = this.hopT / HOP.sec;
+      this.lift = k >= 1 ? 0 : Math.sin(k * Math.PI) * HOP.height;
+      if (k >= 1) this.hopT = -1;
     }
 
     this.syncRoot();
@@ -241,11 +283,14 @@ export class Avatar {
   }
 
   private syncRoot(): void {
-    this.inner.position.copy(this.hip).add(this.offset);
+    this.inner.position.copy(this.hip);
+    this.inner.position.y += this.lift;
     const onDeck = this.flight === 'none' || this.flight === 'landing';
     this.shadow.visible = onDeck;
     this.shadow.position.x = this.hip.x;
     this.shadow.position.z = this.hip.z;
+    // 蹦起来的时候影子小一点
+    this.shadow.scale.setScalar(1 - Math.min(0.4, this.lift));
   }
 
   dispose(): void {

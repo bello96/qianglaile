@@ -5,6 +5,7 @@ import { ReplayPoseSource } from '../engine/input/replaySource';
 import { SimPoseSource } from '../engine/input/simSource';
 import type { PoseSource } from '../engine/input/types';
 import { PlayerTracker } from '../engine/player/playerTracker';
+import { LaneSplit } from '../engine/tracking/lanes';
 import { decodeChoice, encodeChoice, pickModel, SAMPLE_FRAMES, typicalDetectMs, WARMUP_FRAMES } from '../engine/vision/autoModel';
 import { VisionError, type ModelKind } from '../engine/vision/poseDetector';
 
@@ -21,7 +22,10 @@ export interface EngineConfig {
   cameraId: string;
   /** 识别放不放进 Web Worker */
   worker: boolean;
-  /** 模型同时找几个人 */
+  /**
+   * 几个人玩。1：模型只找一个人，一个追踪器跟住他（和一直以来一样）。
+   * 2（双人游戏）：模型同时找两个人，画面分成左右两条泳道，tracker 跟左边那位、mate 跟右边那位。
+   */
   people: 1 | 2;
   /** 用这段录制代替摄像头；null 表示不用 */
   replay: Recording | null;
@@ -49,7 +53,7 @@ export interface EngineDeps {
     onProgress(loaded: number, total: number): void;
     onProblem(kind: 'ended' | 'frozen' | 'detect'): void;
   }): PoseSource;
-  makeSim(opts: { seed: number }): PoseSource;
+  makeSim(opts: { seed: number; people: 1 | 2 }): PoseSource;
   makeReplay(rec: Recording): PoseSource;
   storage: { getItem(key: string): string | null; setItem(key: string, value: string): void } | null;
   /** 日历时间（毫秒），用来给记住的结论盖日期 */
@@ -69,7 +73,7 @@ function realDeps(): EngineDeps {
   }
   return {
     makeCamera: (o) => new CameraPoseSource(o),
-    makeSim: (o) => new SimPoseSource({ noise: 0.006, seed: o.seed }),
+    makeSim: (o) => new SimPoseSource({ noise: 0.006, seed: o.seed, people: o.people }),
     makeReplay: (rec) => new ReplayPoseSource(rec, { loop: true }),
     storage,
     wallClock: () => Date.now(),
@@ -103,7 +107,12 @@ const describe = (err: unknown): { title: string; hint: string } =>
  * 这个类不依赖 React（useEngine 只是订阅它），所以能直接测。
  */
 export class EngineController {
+  /** 1 号玩家（单人时唯一的玩家）。双人时他是屏幕左边那位 */
   readonly tracker = new PlayerTracker();
+  /** 2 号玩家：屏幕右边那位。只有双人（people = 2）时才喂数据 */
+  readonly mate = new PlayerTracker();
+  /** 双人时两条泳道的分界线 */
+  readonly split = new LaneSplit();
 
   private readonly deps: EngineDeps;
   private readonly listeners = new Set<() => void>();
@@ -177,10 +186,12 @@ export class EngineController {
   private matters(a: EngineConfig, b: EngineConfig): boolean {
     const kind = this.kindOf(b);
     if (kind !== this.kindOf(a)) return true;
+    // 几个人玩，对哪种来源都有影响：追踪器怎么分泳道、模拟几个人、模型找几个人
+    if (a.people !== b.people) return true;
     if (kind === 'sim') return a.seed !== b.seed;
     if (kind === 'replay') return a.replay !== b.replay;
     // 模型看的是"实际会用哪个"：把"自动"改成它正在用的那个（或者反过来），不算变化
-    return this.modelFor(a) !== this.modelFor(b) || a.cameraId !== b.cameraId || a.worker !== b.worker || a.people !== b.people;
+    return this.modelFor(a) !== this.modelFor(b) || a.cameraId !== b.cameraId || a.worker !== b.worker;
   }
 
   /** 按这份设置，实际用哪个模型。"自动"而又还没量过时，先用标准的。 */
@@ -216,10 +227,15 @@ export class EngineController {
     const kind = this.kindOf(config);
     // 新的来源看到的画面可能完全不同：之前的标定（原点、身材、认准的人）都作废
     this.tracker.reset();
+    this.mate.reset();
+    this.split.reset();
     this.lastFrameAt = -Infinity;
     this.set({ ...LOADING, kind });
 
     const people = config.people;
+    const duo = people === 2;
+    this.tracker.setLane(duo ? { side: 'left', split: this.split } : null);
+    this.mate.setLane(duo ? { side: 'right', split: this.split } : null);
     const model = this.modelFor(config);
     const measuring = kind === 'camera' && config.model === 'auto' && this.auto[people] === null;
 
@@ -241,7 +257,7 @@ export class EngineController {
 
     const source =
       kind === 'sim'
-        ? this.deps.makeSim({ seed: config.seed ?? 1 })
+        ? this.deps.makeSim({ seed: config.seed ?? 1, people })
         : kind === 'replay'
           ? this.deps.makeReplay(config.replay!)
           : this.deps.makeCamera({
@@ -263,6 +279,11 @@ export class EngineController {
     cleanup.push(
       source.onFrame((f) => {
         if (cancelled) return;
+        if (duo) {
+          // 先挪分界线，再让两位各认各的人
+          this.split.observe(f);
+          this.mate.ingest(f);
+        }
         this.tracker.ingest(f);
         this.lastFrameAt = this.deps.clock();
       }),

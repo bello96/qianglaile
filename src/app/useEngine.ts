@@ -13,7 +13,10 @@ export { STALE_MS };
 
 /** 页面拿到的"引擎"：一个姿态来源 + 一个玩家追踪器，以及加载过程中的状态。 */
 export interface Engine extends EngineSnapshot {
+  /** 1 号玩家（单人时唯一的玩家） */
   tracker: PlayerTracker;
+  /** 2 号玩家；只有双人（people = 2）时才有，单人时是 null */
+  mate: PlayerTracker | null;
   /**
    * 距离上一次识别结果过了多久（毫秒）；还没有过结果时是无穷大。
    * tracker.state 永远是"最后一次"的结果——用它之前先看这个数，太久了（比如超过 STALE_MS）就当作没看到人。
@@ -36,7 +39,7 @@ export function useEngine(opts: {
   seed?: number | null;
   model: 'auto' | ModelKind;
   cameraId: string;
-  /** 同时识别几个人，默认 1 */
+  /** 几个人玩，默认 1。2 = 双人：识别两个人，左右各跟一个（见 EngineConfig.people） */
   people?: 1 | 2;
   expose?: boolean;
   worker?: boolean;
@@ -63,8 +66,11 @@ export function useEngine(opts: {
   useEffect(() => {
     if (!opts.expose || snap.status !== 'ready') return;
     const w = window as unknown as { __mw?: Record<string, unknown> };
-    w.__mw = { ...w.__mw, tracker: controller.tracker, source: snap.source };
-  }, [opts.expose, snap, controller]);
+    w.__mw = { ...w.__mw, tracker: controller.tracker, mate: people === 2 ? controller.mate : null, source: snap.source };
+  }, [opts.expose, snap, controller, people]);
 
-  return useMemo(() => ({ ...snap, tracker: controller.tracker, sinceFrame: controller.sinceFrame, retry: controller.retry, useDemo: controller.useDemo }), [snap, controller]);
+  return useMemo(
+    () => ({ ...snap, tracker: controller.tracker, mate: people === 2 ? controller.mate : null, sinceFrame: controller.sinceFrame, retry: controller.retry, useDemo: controller.useDemo }),
+    [snap, controller, people],
+  );
 }

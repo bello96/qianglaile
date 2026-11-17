@@ -48,7 +48,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
 
-  const toggle = (key: keyof Pick<Settings, 'sound' | 'voice' | 'pip' | 'skeleton' | 'twoPeople'>) => (
+  const toggle = (key: keyof Pick<Settings, 'sound' | 'voice' | 'pip' | 'skeleton'>) => (
     <Segmented value={s[key] ? 'on' : 'off'} options={onOff} onChange={(v) => update({ [key]: v === 'on' })} />
   );
 
@@ -86,10 +86,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             ]}
             onChange={(model) => update({ model })}
           />
-        </Field>
-
-        <Field label="同时识别两个人" note="家里人多、常有人从镜头前走过时打开：旁人在场也能一直跟住你。每帧多花十来毫秒。">
-          {toggle('twoPeople')}
         </Field>
 
         <Field label="画质" note="自动：识别只能用轻量模型或者只能靠 CPU 的电脑，画面也用低画质。">

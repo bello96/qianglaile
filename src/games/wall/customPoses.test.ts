@@ -36,6 +36,12 @@ describe('validatePose', () => {
     for (const p of POSES) expect(validatePose(JSON.parse(JSON.stringify(p))), p.id).toEqual(p);
   });
 
+  it('keeps the "never mirror" mark, and only as a yes / no', () => {
+    expect(validatePose({ ...T, noMirror: true })?.noMirror).toBe(true);
+    expect(validatePose({ ...T, noMirror: false })).toEqual(T);
+    expect(validatePose({ ...T, noMirror: 'yes' })).toBeNull();
+  });
+
   it('drops fields it does not know', () => {
     const clean = validatePose({ ...T, hax: true, armL: [{ a: 90, evil: 1 }, { a: 90 }] });
     expect(clean).toEqual(T);
@@ -175,6 +181,11 @@ describe('estimateTier / isUpperOk', () => {
     expect(estimateTier(getPose('crane')!)).toBe(4);
   });
 
+  it('counts bending forward at the waist as hard as a squat', () => {
+    expect(estimateTier(getPose('bow')!)).toBe(3);
+    expect(estimateTier({ ...T, spine: { a: 0, s: 0.9 } })).toBe(1); // 只是量出来短了一点，不算弯腰
+  });
+
   it('agrees with the hand-assigned tier of every built-in pose', () => {
     for (const p of POSES) expect(estimateTier(p), p.id).toBe(p.tier);
   });
@@ -223,7 +234,7 @@ describe('capturePose', () => {
 
 describe('poseToCode', () => {
   it('produces source that evaluates back to the same pose', () => {
-    for (const p of [T, getPose('side-bend')!, getPose('low')!]) {
+    for (const p of [T, getPose('side-bend')!, getPose('low')!, getPose('salute')!]) {
       const code = poseToCode(p);
       expect(new Function(`return (${code})`)()).toEqual(p);
       expect(code).toContain(`id: '${p.id}'`);

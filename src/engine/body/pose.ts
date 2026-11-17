@@ -35,6 +35,8 @@ export interface PoseSpec {
   spine?: Limb;
   /** 头相对脊柱的偏角 */
   head?: number;
+  /** 出墙时不取左右镜像（比如敬礼：必须是右手） */
+  noMirror?: boolean;
 }
 
 export const JOINTS = [

@@ -16,16 +16,11 @@ export interface Settings {
   skeleton: boolean;
   quality: 'auto' | 'low' | 'high';
   cameraId: string;
-  /**
-   * 让识别模型同时找两个人。家里人多、常有人从镜头前走过时打开：旁人在场也能一直跟住玩家。
-   * 代价是每帧多花十来毫秒，所以默认关着。
-   */
-  twoPeople: boolean;
 }
 
 export const SETTINGS_KEY = 'mw.settings';
 
-export const DEFAULT_SETTINGS: Settings = { difficulty: 'normal', model: 'auto', sound: true, voice: true, pip: true, skeleton: false, quality: 'auto', cameraId: '', twoPeople: false };
+export const DEFAULT_SETTINGS: Settings = { difficulty: 'normal', model: 'auto', sound: true, voice: true, pip: true, skeleton: false, quality: 'auto', cameraId: '' };
 
 const oneOf =
   <T extends string>(...allowed: T[]) =>
@@ -43,7 +38,6 @@ const VALID: { [K in keyof Settings]: (v: unknown) => v is Settings[K] } = {
   skeleton: isBool,
   quality: oneOf('auto', 'low', 'high'),
   cameraId: (v): v is string => typeof v === 'string',
-  twoPeople: isBool,
 };
 
 const browserStorage = (): Storage | undefined => {

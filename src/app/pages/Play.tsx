@@ -37,7 +37,8 @@ function PlayGame({ mod, onSettings }: { mod: GameModule; onSettings: () => void
     seed: flags.seed,
     model: settings.model,
     cameraId: settings.cameraId,
-    people: settings.twoPeople ? 2 : 1,
+    // 双人：地址里写了 players=2，而且这个游戏支持两个人
+    people: flags.players === 2 && mod.maxPlayers === 2 ? 2 : 1,
     expose: flags.e2e || import.meta.env.DEV,
     worker: flags.worker,
   });

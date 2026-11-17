@@ -3,6 +3,7 @@ import { JOINTS, type JointName, type Skeleton } from '../body/pose';
 import { defaultProfile, ProfileEstimator, type BodyProfile } from '../body/profile';
 import type { RawFrame } from '../input/types';
 import { MotionAnalyzer, type Motion, type MotionEvent } from '../motion/features';
+import type { Lane } from '../tracking/lanes';
 import { PersonSelector } from '../tracking/selectPerson';
 import { clamp, damp } from '../util/math';
 
@@ -43,6 +44,9 @@ export class PlayerTracker {
   private readonly analyzer = new MotionAnalyzer();
 
   private frozen: BodyProfile | null = null;
+  private lane: Lane | null = null;
+  /** 标定过了没有（标定之后原点就定住了） */
+  private calibrated = false;
   private lastSeen: number | null = null;
   private lastView: ViewWindow | null = null;
   private firstT: number | null = null;
@@ -74,6 +78,8 @@ export class PlayerTracker {
     if (this.firstT === null) this.firstT = frame.t;
     const profile = this.profile();
     const pose = this.selector.pick(frame);
+    // 双人、还没标定：原点先放在两人中间那条线上，这样开局前两位的身体就已经一左一右了
+    if (this.lane && !this.calibrated) this.builder.homeAt(this.lane.split.value * frame.aspect);
     const body = pose ? this.builder.update(pose, frame.t, frame.aspect, profile) : null;
 
     let motion = this.current.motion;
@@ -105,14 +111,26 @@ export class PlayerTracker {
   }
 
   /**
-   * 标定：把玩家现在站的位置记为 x = 0，并把量到的身材定下来（之后不再变）。
+   * 双人模式：只跟这条泳道里的人（见 tracking/lanes.ts）。null = 不分泳道（单人）。
+   * 这是引擎的配置，reset() 不会清掉它。
+   */
+  setLane(lane: Lane | null): void {
+    this.lane = lane;
+    this.selector.setLane(lane);
+  }
+
+  /**
+   * 标定：把玩家现在站的位置记为 x = 0（双人时传 at.x：这位玩家那条泳道的中心），并把量到的身材定下来（之后不再变）。
    * 返回"摄像头看得见的范围"——已经换算到新原点（还没见过人时返回 null）。
    * 一定要用这里返回的，不要用标定前那一帧的 body.view：那是相对旧原点量的，玩家挪过位置的话左右是歪的。
    */
-  calibrate(): ViewWindow | null {
+  calibrate(at: { x?: number } = {}): ViewWindow | null {
     // 从现在起只认这个位置附近的人：跟丢之后旁人入镜，不会被当成玩家（见 PersonSelector）
     this.selector.lock();
-    const shift = this.builder.setHome();
+    // 两条泳道的分界线也定住：开局之后谁走动都不能把它带跑
+    this.lane?.split.freeze();
+    this.calibrated = true;
+    const shift = this.builder.setHome(at.x ?? 0);
     this.frozen = this.estimator.profile;
     this.current = { ...this.current, profile: this.frozen, profileReady: true };
     if (!this.lastView) return null;
@@ -164,6 +182,7 @@ export class PlayerTracker {
     this.estimator.reset();
     this.analyzer.reset();
     this.frozen = null;
+    this.calibrated = false;
     this.lastSeen = this.firstT = this.lastSampleMs = null;
     this.lastView = null;
     this.target = this.display = null;

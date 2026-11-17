@@ -146,10 +146,32 @@ export function judgeShape(field: WallField, caps: Capsule[], tol: ShapeTol): Sh
 
 // ---------------------------------------------------------------- 结果
 
-export type Outcome = { kind: 'hit'; reason: string; badParts: PartId[] } | { kind: 'pass'; stars: 1 | 2 | 3; accuracy: number };
+/** 一位玩家过一面墙的结果。 */
+export type SoloOutcome = { kind: 'hit'; reason: string; badParts: PartId[] } | { kind: 'pass'; stars: 1 | 2 | 3; accuracy: number };
+
+/**
+ * 一面墙的结果。单人就是那位玩家的结果。
+ * 双人是两位合起来的（见 combineOutcomes），each 里是各自的：[1 号（左边那位）, 2 号（右边那位）]。
+ */
+export type Outcome = SoloOutcome & { each?: [SoloOutcome, SoloOutcome] };
+
+/**
+ * 双人：两位各自的结果合成这面墙的结果。
+ *   两个人都过才算过；评星和契合度取两人里较低的那个。
+ *   有人没过就是撞墙，reason 里说清是谁（左边 / 右边，都是屏幕上的左右）。
+ *   badParts 是 1 号身上该变红的部位；2 号的在 each[1] 里。
+ */
+export function combineOutcomes(a: SoloOutcome, b: SoloOutcome): Outcome {
+  const each: [SoloOutcome, SoloOutcome] = [a, b];
+  if (a.kind === 'pass' && b.kind === 'pass') {
+    return { kind: 'pass', stars: Math.min(a.stars, b.stars) as 1 | 2 | 3, accuracy: Math.min(a.accuracy, b.accuracy), each };
+  }
+  const said = [a.kind === 'hit' ? `左边：${a.reason}` : '', b.kind === 'hit' ? `右边：${b.reason}` : ''].filter(Boolean);
+  return { kind: 'hit', reason: said.join('；'), badParts: a.kind === 'hit' ? a.badParts : [], each };
+}
 
 /** 墙到达时调用：把最近一小段时间里的判定结果汇总成最终结果。要过半数才算过。 */
-export function resolveOutcome(samples: (PoseJudge | ShapeJudge)[]): Outcome {
+export function resolveOutcome(samples: (PoseJudge | ShapeJudge)[]): SoloOutcome {
   if (samples.length === 0) return { kind: 'hit', reason: reasonText(null), badParts: [] };
 
   if (samples[0].kind === 'pose') {

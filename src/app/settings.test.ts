@@ -5,15 +5,14 @@ const storageWith = (value: string | null) => ({ getItem: (key: string) => (key 
 
 describe('settings', () => {
   it('has sensible defaults', () => {
-    expect(DEFAULT_SETTINGS).toEqual({ difficulty: 'normal', model: 'auto', sound: true, voice: true, pip: true, skeleton: false, quality: 'auto', cameraId: '', twoPeople: false });
+    expect(DEFAULT_SETTINGS).toEqual({ difficulty: 'normal', model: 'auto', sound: true, voice: true, pip: true, skeleton: false, quality: 'auto', cameraId: '' });
   });
 
-  it('looks for one person unless told otherwise, and remembers being told', () => {
-    // 多找一个人每帧要多花十来毫秒，所以默认不找
-    expect(loadSettings(storageWith('{"difficulty":"hard"}')).twoPeople).toBe(false); // 旧版本存下来的设置里没有这一项
-    expect(loadSettings(storageWith('{"twoPeople":true}')).twoPeople).toBe(true);
-    expect(loadSettings(storageWith('{"twoPeople":"yes"}')).twoPeople).toBe(false);
-    expect(loadSettings(storageWith('{"twoPeople":2}')).twoPeople).toBe(false);
+  it('quietly drops the old "look for two people" switch that an earlier version may have saved', () => {
+    // 那个开关没有了：找几个人现在由单人 / 双人模式决定。浏览器里存着的旧值不能让读设置出错，也不该被留着
+    const loaded = loadSettings(storageWith('{"twoPeople":true,"sound":false}'));
+    expect(loaded).toEqual({ ...DEFAULT_SETTINGS, sound: false });
+    expect('twoPeople' in loaded).toBe(false);
   });
 
   it('loads defaults from empty storage', () => {

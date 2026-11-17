@@ -52,7 +52,10 @@ export function Home({ onSettings }: { onSettings: () => void }) {
           </div>
           <div className="home__actions">
             <Button go xl onClick={() => navigate({ page: 'play', game: 'wall' })}>
-              开始闯关
+              单人游戏
+            </Button>
+            <Button xl onClick={() => navigate({ page: 'play', game: 'wall' }, { players: '2' })}>
+              双人游戏
             </Button>
             {/* 其余登记过的游戏：在 src/games/index.ts 里加一行，这里就多一个按钮 */}
             {GAMES.filter((g) => g.id !== 'wall').map((g) => (

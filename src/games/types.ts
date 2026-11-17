@@ -26,5 +26,7 @@ export interface GameModule {
   id: string;
   name: string;
   blurb: string;
+  /** 最多几个人一起玩（不写就是 1）。写 2 的游戏，地址里带 players=2 时引擎会左右各跟一个人 */
+  maxPlayers?: 1 | 2;
   Component: LazyExoticComponent<ComponentType<GameProps>>;
 }

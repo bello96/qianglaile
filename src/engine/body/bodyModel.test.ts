@@ -165,3 +165,42 @@ describe('BodyBuilder', () => {
     expect(builder.update(f.poses[0], f.t, f.aspect, profile)!.root.x).toBeCloseTo(0, 2);
   });
 });
+
+describe('BodyBuilder: an origin that is not under the player (two-player lanes)', () => {
+  it('setHome(x) makes the spot where the player stands x, and reports how far every old coordinate moved', () => {
+    const { bodies, builder, sim } = run({ noise: 0 }, (s) => s.setPose(NEUTRAL, { x: 0.4 }, 0));
+    const before = last(bodies)!;
+    const shift = builder.setHome(-0.7);
+    const f = sim.step(33);
+    const body = builder.update(f.poses[0], f.t, f.aspect, profile)!;
+    expect(body.root.x).toBeCloseTo(-0.7, 2);
+    expect(shift).toBeCloseTo(before.root.x + 0.7, 2); // 旧坐标 − 新坐标
+    expect(body.view.left).toBeCloseTo(before.view.left - shift, 2);
+    expect(body.view.right).toBeCloseTo(before.view.right - shift, 2);
+  });
+
+  it('steps are still measured from there', () => {
+    const { builder, sim } = run({ noise: 0 });
+    builder.setHome(-0.7);
+    sim.setPose(NEUTRAL, { x: 0.3 }, 0);
+    let body: Body | null = null;
+    for (let i = 0; i < 30; i++) {
+      const f = sim.step(33);
+      body = builder.update(f.poses[0], f.t, f.aspect, profile);
+    }
+    expect(body!.root.x).toBeCloseTo(-0.4, 2);
+  });
+
+  it('setHome() with no argument still means x = 0', () => {
+    const { builder, sim } = run({ noise: 0 }, (s) => s.setPose(NEUTRAL, { x: 0.4 }, 0));
+    builder.setHome();
+    const f = sim.step(33);
+    expect(builder.update(f.poses[0], f.t, f.aspect, profile)!.root.x).toBeCloseTo(0, 2);
+  });
+
+  it('rootU says where across the picture the hips are, in picture heights', () => {
+    expect(new BodyBuilder().rootU).toBeNull();
+    const { builder } = run({ noise: 0 }, (s) => s.setPose(NEUTRAL, { x: 0.5 }, 0));
+    expect(builder.rootU!).toBeCloseTo(ASPECT / 2 - 0.5 * 0.42, 2);
+  });
+});

@@ -22,7 +22,21 @@ export interface HudSnap {
   progress: number;
 }
 
-export const IDLE_SNAP: HudSnap = { phase: 'idle', level: 1, wallInLevel: 0, wallsInLevel: 5, lives: COMMON.lives, score: 0, combo: 0, label: '', hint: '', ok: null, accuracy: 0, timeLeft: 0, progress: 0 };
+export const IDLE_SNAP: HudSnap = {
+  phase: 'idle',
+  level: 1,
+  wallInLevel: 0,
+  wallsInLevel: COMMON.levelSlots[0][0] + COMMON.levelSlots[0][1],
+  lives: COMMON.lives,
+  score: 0,
+  combo: 0,
+  label: '',
+  hint: '',
+  ok: null,
+  accuracy: 0,
+  timeLeft: 0,
+  progress: 0,
+};
 
 export function toSnap(s: WallGameState): HudSnap {
   return {
@@ -42,12 +56,20 @@ export function toSnap(s: WallGameState): HudSnap {
   };
 }
 
-/** 正中的大横幅。key 变了就重新播放入场动画。 */
+/**
+ * 正中的大横幅。key 变了就重新播放入场动画。
+ * kind：perfect / pass / hit 是一面墙的结果，count 是倒计时，level 是一般的通知（这面墙不算……），
+ * clear 是过了一关，intro 是下一关的预告（字多，小一号），finale 是全部通关（停得久）。
+ */
 export interface BannerData {
   key: number;
-  kind: 'perfect' | 'pass' | 'hit' | 'level' | 'count';
+  kind: 'perfect' | 'pass' | 'hit' | 'level' | 'count' | 'clear' | 'intro' | 'finale';
   text: string;
   sub?: string;
+  /** 过墙：下面那行是几颗一颗一颗蹦出来的星星，后面跟着得分（给了它就不用 sub） */
+  stars?: { count: number; gained: number };
+  /** 屏幕边缘闪一下：good 绿，bad 红 */
+  flash?: 'good' | 'bad';
 }
 
 function LifeRing({ lost }: { lost: boolean }) {
@@ -65,10 +87,26 @@ function Banner({ data }: { data: BannerData }) {
   return (
     <div className={`banner banner--${data.kind}`} role="status">
       <div className="banner__text">{data.text}</div>
-      {data.sub && <div className="plate banner__sub">{data.sub}</div>}
+      {data.stars ? (
+        <div className="plate banner__sub">
+          {Array.from({ length: data.stars.count }, (_, i) => (
+            // 一颗一颗蹦出来：每颗晚 0.17 秒（声音在 WallPlay 里按同样的间隔响）
+            <span key={i} className="star-pop" style={{ animationDelay: `${STAR_FIRST_MS + i * STAR_EVERY_MS}ms` }}>
+              ★
+            </span>
+          ))}
+          　+{data.stars.gained}
+        </div>
+      ) : (
+        data.sub && <div className="plate banner__sub">{data.sub}</div>
+      )}
     </div>
   );
 }
+
+/** 过墙横幅上的星星：第一颗多久之后蹦出来，之后每隔多久一颗（毫秒）。"叮"的声音按同一个节奏响 */
+export const STAR_FIRST_MS = 180;
+export const STAR_EVERY_MS = 170;
 
 const RING = 2 * Math.PI * 42;
 
@@ -140,6 +178,7 @@ export function Hud({ snap, banner, onPause, onSettings }: { snap: HudSnap; bann
         </>
       )}
 
+      {banner?.flash && <div key={`flash-${banner.key}`} className={`edge-flash edge-flash--${banner.flash}`} aria-hidden="true" />}
       {banner && <Banner key={banner.key} data={banner} />}
     </div>
   );

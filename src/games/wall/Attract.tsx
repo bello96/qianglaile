@@ -10,7 +10,7 @@ import { WallSession, type SessionEngine } from './session';
 import { SHAPES } from './shapes';
 
 /** 演示打到第几关就从头再来：越往后墙越快，当背景不需要那么紧张 */
-const RESTART_AT_LEVEL = 4;
+const RESTART_AT_LEVEL = 9;
 /** 模拟玩家每秒出多少帧"识别结果" */
 const SIM_STEP_MS = 1000 / 30;
 
@@ -61,13 +61,13 @@ export default function Attract({ quality, expose = false }: { quality: 'low' | 
       }
 
       for (const e of session.update(now, dt, engine)) {
-        if (e.type === 'begin') scene.setProfile(e.ctx.profile);
+        if (e.type === 'begin') scene.setProfiles([e.ctx.profile]);
         else scene.handle(e);
         // 没命了，或者打到后面太快了：从头再来
         if (e.type === 'over' || (e.type === 'levelup' && e.level >= RESTART_AT_LEVEL)) session.again();
       }
       const game = session.game;
-      scene.frame(dt, game?.state ?? IDLE_STATE, tracker.sample(now), game?.assist() ?? null);
+      scene.frame(dt, game?.state ?? IDLE_STATE, [tracker.sample(now)], [game?.assist() ?? null]);
     };
     // 这只是首页的背景：万一出了错，停在那一帧就行，不值得把整个首页换成出错卡片
     const stop = startFrameLoop(frame, (err) => console.error('[attract] 首页的演示停了：', err));

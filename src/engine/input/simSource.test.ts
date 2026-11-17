@@ -3,6 +3,8 @@ import { LM } from '../body/landmarks';
 import { fitSimilarity, toMetric } from '../body/metric';
 import { DEFAULT_LEG, NEUTRAL, poseToSkeleton, type PoseSpec } from '../body/pose';
 import { defaultProfile } from '../body/profile';
+import { PlayerTracker } from '../player/playerTracker';
+import { LaneSplit } from '../tracking/lanes';
 import { jointsToRawPose, SimPoseSource, skeletonToJoints33, type SimCamera } from './simSource';
 import type { RawFrame } from './types';
 
@@ -155,6 +157,80 @@ describe('SimPoseSource', () => {
   });
 
   it('reports itself in stats', () => {
-    expect(new SimPoseSource({ fps: 30 }).stats()).toEqual({ fps: 30, detectMs: 0, delegate: 'sim', model: 'sim' });
+    expect(new SimPoseSource({ fps: 30 }).stats()).toEqual({ fps: 30, detectMs: 0, delegate: 'sim', model: 'sim', people: 1 });
+  });
+});
+
+describe('SimPoseSource with two players', () => {
+  const hipX = (frame: RawFrame, who: number): number => (frame.poses[who].image[LM.leftHip].x + frame.poses[who].image[LM.rightHip].x) / 2;
+  /** 两条泳道各一个追踪器，站一会儿之后各自标定到 ∓gap/2。 */
+  function tracked(sim: SimPoseSource, gap = 1.5): [PlayerTracker, PlayerTracker] {
+    const split = new LaneSplit();
+    const p1 = new PlayerTracker();
+    const p2 = new PlayerTracker();
+    p1.setLane({ side: 'left', split });
+    p2.setLane({ side: 'right', split });
+    const feed = (n: number): void => {
+      for (let i = 0; i < n; i++) {
+        const f = sim.step(33);
+        split.observe(f);
+        p1.ingest(f);
+        p2.ingest(f);
+      }
+    };
+    feed(20);
+    p1.calibrate({ x: -gap / 2 });
+    p2.calibrate({ x: gap / 2 });
+    feed(20);
+    return [p1, p2];
+  }
+
+  it('puts two people in every frame, 1.5 m apart, player 0 on the left of the screen', () => {
+    const sim = new SimPoseSource({ noise: 0, people: 2 });
+    const f = sim.step(33);
+    expect(f.poses).toHaveLength(2);
+    // 没镜像的画面里，屏幕左边的人 x 更大
+    expect(hipX(f, 0)).toBeGreaterThan(0.5);
+    expect(hipX(f, 1)).toBeLessThan(0.5);
+    expect(hipX(f, 0) - hipX(f, 1)).toBeCloseTo((1.5 * cam.s) / cam.aspect, 3);
+    expect(sim.stats().people).toBe(2);
+  });
+
+  it('honours a custom gap', () => {
+    const f = new SimPoseSource({ noise: 0, people: 2, gap: 1.2 }).step(33);
+    expect(hipX(f, 0) - hipX(f, 1)).toBeCloseTo((1.2 * cam.s) / cam.aspect, 3);
+  });
+
+  it('once each lane is calibrated to its spot, the two bodies sit at -gap/2 and +gap/2 on the stage', () => {
+    const [p1, p2] = tracked(new SimPoseSource({ noise: 0, people: 2 }));
+    expect(p1.state.body!.root.x).toBeCloseTo(-0.75, 2);
+    expect(p2.state.body!.root.x).toBeCloseTo(0.75, 2);
+  });
+
+  it('poses one player at a time, at a stage position', () => {
+    const sim = new SimPoseSource({ noise: 0, people: 2 });
+    sim.setPose(T, { x: -0.6 }, 0, 0);
+    const [p1, p2] = tracked(sim);
+    // 0 号摆了 T 字、挪到了 -0.6；1 号没动
+    const a = p1.state.body!.skeleton;
+    const b = p2.state.body!.skeleton;
+    expect(a.wristL.y).toBeCloseTo(a.shoulderL.y, 1);
+    expect(b.wristL.y).toBeLessThan(b.shoulderL.y - 0.3);
+    sim.setPose(T, { x: 0.9 }, 0, 1);
+    for (let i = 0; i < 20; i++) p2.ingest(sim.step(33));
+    expect(p2.state.body!.root.x).toBeCloseTo(0.9, 2);
+    expect(p2.state.body!.skeleton.wristR.y).toBeCloseTo(p2.state.body!.skeleton.shoulderR.y, 1);
+  });
+
+  it('either player can leave the frame on their own', () => {
+    const sim = new SimPoseSource({ noise: 0, people: 2 });
+    sim.setPresent(false, 1);
+    const alone = sim.step(33);
+    expect(alone.poses).toHaveLength(1);
+    expect(hipX(alone, 0)).toBeGreaterThan(0.5); // 留下的是 0 号
+    sim.setPresent(true, 1);
+    expect(sim.step(33).poses).toHaveLength(2);
+    sim.setPresent(false); // 不说是谁：两个都走
+    expect(sim.step(33).poses).toHaveLength(0);
   });
 });

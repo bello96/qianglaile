@@ -11,6 +11,7 @@ export const GAMES: GameModule[] = [
     id: 'wall',
     name: BRAND.wallGame,
     blurb: '墙来之前摆好姿势，从洞里穿过去。',
+    maxPlayers: 2,
     Component: lazy(() => import('./wall/WallPlay')),
   },
   {

@@ -3,9 +3,9 @@ import { BodyBuilder, type Body } from '../../engine/body/bodyModel';
 import { poseToSkeleton, type JointName, type PoseSpec, type Skeleton } from '../../engine/body/pose';
 import { defaultProfile, scaleProfile, type BodyProfile } from '../../engine/body/profile';
 import { SimPoseSource } from '../../engine/input/simSource';
-import { allJointsOk, skeletonCapsules } from './bodyShape';
+import { allJointsOk, skeletonCapsules, type PartId } from './bodyShape';
 import { buildField } from './field';
-import { judgePose, judgeShape, reasonText, resolveOutcome, type PoseJudge, type ShapeJudge } from './judge';
+import { combineOutcomes, judgePose, judgeShape, reasonText, resolveOutcome, type PoseJudge, type ShapeJudge, type SoloOutcome } from './judge';
 import { getPose, STAND } from './poses';
 import { getShape, SHAPES } from './shapes';
 import { COMMON, TUNING } from './tuning';
@@ -330,5 +330,36 @@ describe('reasonText', () => {
     // 最差的是脊柱
     expect(reasonText(pose(['spine', 'upperArmL', 'upperArmR'], { spine: 90, upperArmL: 40, upperArmR: 40 }))).toBe('身体没摆正');
     expect(reasonText(null)).toBe('没看到你');
+  });
+});
+
+describe('combineOutcomes (two players, one wall)', () => {
+  const pass = (stars: 1 | 2 | 3, accuracy: number): SoloOutcome => ({ kind: 'pass', stars, accuracy });
+  const hit = (reason: string, badParts: PartId[] = ['forearmL']): SoloOutcome => ({ kind: 'hit', reason, badParts });
+
+  it('passes only when both pass, and scores the pair by the weaker of the two', () => {
+    const a = pass(3, 0.9);
+    const b = pass(1, 0.55);
+    expect(combineOutcomes(a, b)).toEqual({ kind: 'pass', stars: 1, accuracy: 0.55, each: [a, b] });
+    expect(combineOutcomes(b, a)).toMatchObject({ kind: 'pass', stars: 1, accuracy: 0.55 });
+  });
+
+  it('says who got it wrong: the player on the left…', () => {
+    const a = hit('右手没摆对', ['forearmR', 'handR']);
+    const b = pass(2, 0.7);
+    expect(combineOutcomes(a, b)).toEqual({ kind: 'hit', reason: '左边：右手没摆对', badParts: ['forearmR', 'handR'], each: [a, b] });
+  });
+
+  it('…or the one on the right', () => {
+    const a = pass(3, 0.9);
+    const b = hit('往左站一点');
+    // badParts 是 1 号身上该变红的部位；这回错的是 2 号，所以是空的（2 号的在 each[1] 里）
+    expect(combineOutcomes(a, b)).toEqual({ kind: 'hit', reason: '右边：往左站一点', badParts: [], each: [a, b] });
+  });
+
+  it('…or both', () => {
+    const a = hit('双手没摆对', ['upperArmL']);
+    const b = hit('身体撞到了', ['torso']);
+    expect(combineOutcomes(a, b)).toEqual({ kind: 'hit', reason: '左边：双手没摆对；右边：身体撞到了', badParts: ['upperArmL'], each: [a, b] });
   });
 });

@@ -40,11 +40,11 @@ describe('routeHref', () => {
 
 describe('readFlags', () => {
   it('defaults to a normal run', () => {
-    expect(readFlags('')).toEqual({ sim: 'off', seed: null, debug: false, e2e: false, fast: false, worker: true, only: null });
+    expect(readFlags('')).toEqual({ sim: 'off', seed: null, debug: false, e2e: false, fast: false, worker: true, only: null, level: null, players: 1 });
   });
 
   it('reads the development switches', () => {
-    expect(readFlags('?sim=auto&seed=7&e2e=1')).toEqual({ sim: 'auto', seed: 7, debug: false, e2e: true, fast: false, worker: true, only: null });
+    expect(readFlags('?sim=auto&seed=7&e2e=1')).toEqual({ sim: 'auto', seed: 7, debug: false, e2e: true, fast: false, worker: true, only: null, level: null, players: 1 });
     expect(readFlags('?sim=wrong&fast=1&debug=1')).toMatchObject({ sim: 'wrong', fast: true, debug: true });
     expect(readFlags('?sim=manual').sim).toBe('manual');
   });
@@ -70,6 +70,19 @@ describe('readFlags', () => {
     expect(readFlags('?only=../x').only).toBeNull();
     expect(readFlags('?only=<b>').only).toBeNull();
     expect(readFlags('?only=' + 'a'.repeat(60)).only).toBeNull();
+  });
+
+  it('reads which level to start at, and ignores anything that is not a whole number from 1 to 15', () => {
+    expect(readFlags('?level=15').level).toBe(15);
+    expect(readFlags('?level=1').level).toBe(1);
+    for (const bad of ['0', '16', 'abc', '3.5', '-2', '', '1e1']) expect(readFlags('?level=' + bad).level, bad).toBeNull();
+    expect(readFlags('').level).toBeNull();
+  });
+
+  it('reads the number of players: two only when it says exactly 2', () => {
+    expect(readFlags('?players=2').players).toBe(2);
+    for (const other of ['1', '3', '0', 'abc', '', '2.0', '02']) expect(readFlags('?players=' + other).players, other).toBe(1);
+    expect(readFlags('#/play/wall?players=2&sim=auto')).toMatchObject({ players: 2, sim: 'auto' });
   });
 
   it('finds flags that sit after the hash, where a hash router puts them', () => {

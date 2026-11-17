@@ -49,7 +49,7 @@ export function isPoseNameOk(name: unknown): name is string {
  */
 export function validatePose(input: unknown): PoseSpec | null {
   if (!isObj(input)) return null;
-  const { id, name, say, tier, upperOk, spine, head } = input;
+  const { id, name, say, tier, upperOk, spine, head, noMirror } = input;
   if (typeof id !== 'string' || !ID_OK.test(id)) return null;
   if (!isPoseNameOk(name)) return null;
   if (say !== undefined && !isText(say, 40)) return null;
@@ -69,6 +69,7 @@ export function validatePose(input: unknown): PoseSpec | null {
   if (head !== undefined && !isNum(head, -60, 60)) return null;
   if (tier !== undefined && tier !== 1 && tier !== 2 && tier !== 3 && tier !== 4) return null;
   if (upperOk !== undefined && typeof upperOk !== 'boolean') return null;
+  if (noMirror !== undefined && typeof noMirror !== 'boolean') return null;
 
   return {
     id,
@@ -78,6 +79,7 @@ export function validatePose(input: unknown): PoseSpec | null {
     ...(say ? { say } : {}),
     ...parts,
     ...(head !== undefined ? { head } : {}),
+    ...(noMirror ? { noMirror: true } : {}),
   };
 }
 
@@ -86,14 +88,16 @@ const BLANK = { id: 'x', name: 'x', tier: 1 as const, upperOk: true };
 
 /**
  * 自动估一个姿势有多难（和内置姿势库的分层标准一致）：
- *   4 单脚（两只脚不在一个高度）· 3 侧倾或下蹲 · 2 左右不对称或双脚分开 · 1 其余
+ *   4 单脚（两只脚不在一个高度）· 3 侧倾、下蹲或向前弯腰 · 2 左右不对称或双脚分开 · 1 其余
  */
 export function estimateTier(spec: Parts): 1 | 2 | 3 | 4 {
   const sk = poseToSkeleton({ ...BLANK, ...spec }, defaultProfile());
   if (Math.abs(sk.ankleL.y - sk.ankleR.y) > 0.15) return 4;
 
   const thighs = [spec.legL[0], spec.legR[0]];
-  if (Math.abs(spec.spine?.a ?? 0) > 10 || thighs.some((t) => scaleOf(t) < 0.85 || Math.abs(t.a) > 45)) return 3;
+  // 上身朝镜头压下去（向前弯腰），正面看躯干变短：和下蹲一样算第 3 层
+  const bentForward = (spec.spine?.s ?? 1) < 0.85;
+  if (Math.abs(spec.spine?.a ?? 0) > 10 || bentForward || thighs.some((t) => scaleOf(t) < 0.85 || Math.abs(t.a) > 45)) return 3;
 
   const armsDiffer = angleDiff(spec.armL[0].a, spec.armR[0].a) > 20 || angleDiff(spec.armL[1].a, spec.armR[1].a) > 20;
   if (armsDiffer || thighs.some((t) => Math.abs(t.a) > 14)) return 2;
@@ -138,6 +142,7 @@ export function poseToCode(spec: PoseSpec): string {
     `legR: ${pair(spec.legR)}`,
     ...(spec.spine ? [`spine: ${limb(spec.spine)}`] : []),
     ...(spec.head !== undefined ? [`head: ${spec.head}`] : []),
+    ...(spec.noMirror ? ['noMirror: true'] : []),
   ];
   return `{ ${fields.join(', ')} }`;
 }

@@ -20,6 +20,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'e2e-out');
 const PHOTO = path.join(ROOT, 'tests/fixtures/photos/pose.jpg');
 const FAKE_CAM = path.join(OUT, 'pose.mjpeg');
+/** 并排两个人的假摄像头（同一张照片左右各一份），双人模式用 */
+const DUO_CAM = path.join(OUT, 'pose-duo.mjpeg');
 const WALLS_FILE = path.join(ROOT, 'public/custom-poses.json');
 /** dev-save 场景会改上面这个文件；改之前把它原样存到这里（见 tools/fileBackup.mjs） */
 const WALLS_BACKUP = path.join(OUT, 'custom-poses.before-e2e');
@@ -76,7 +78,7 @@ const SCENARIOS = [
     about: '首页能打开',
     async run({ base, page }) {
       await page.goto(`${base}/?e2e=1#/`);
-      expect(await page.waitFor(`document.title.includes('体感工坊') && ${BUTTON('开始闯关')}`, 15000), '首页没有出现标题或"开始闯关"按钮');
+      expect(await page.waitFor(`document.title.includes('体感工坊') && ${BUTTON('单人游戏')} && ${BUTTON('双人游戏')}`, 15000), '首页没有出现标题或"单人游戏""双人游戏"两个按钮');
       expect(await page.evaluate(`!!${BUTTON('戳泡泡')} && !!${BUTTON('姿势实验室')}`), '首页缺少"戳泡泡"或"姿势实验室"的入口');
 
       // 背景里的自动演示：模拟玩家自己在闯关（不开摄像头）
@@ -109,8 +111,79 @@ const SCENARIOS = [
     about: '模拟玩家一直站着，撞三次后结算',
     async run({ base, page }) {
       await page.goto(`${base}/#/play/wall?sim=wrong&fast=1&e2e=1`);
-      expect(await page.waitFor(`${GAME}?.phase === 'over' && ${BUTTON('再来一次')}`, 60000), '60 秒内没有出现结算和"再来一次"');
+      expect(await page.waitFor(`${GAME}?.phase === 'over' && ${BUTTON('再闯这一关')} && ${BUTTON('从头再来')}`, 60000), '60 秒内没有出现结算和"再闯这一关""从头再来"');
+      expect(await page.evaluate(`document.body.textContent.includes('差一点点，再来一次肯定行！')`), '没通关的结算面板缺了那句鼓励');
       expect((await page.evaluate(`${GAME}.lives`)) === 0, '结算时命数不是 0');
+    },
+  },
+  {
+    name: 'duo-sim',
+    about: '双人：两个模拟玩家一左一右，一面墙两个洞，连过五面不掉命',
+    async run({ base, page }) {
+      await page.goto(`${base}/#/play/wall?players=2&sim=auto&seed=7&fast=1&e2e=1`);
+      expect(await page.waitFor(`${GAME}?.wallIndex >= 6`, 90000), `90 秒内没有到第 6 面墙：${JSON.stringify(await page.evaluate(`(({ phase, wallIndex, lives }) => ({ phase, wallIndex, lives }))(${GAME} ?? {})`))}`);
+      const info = await page.evaluate(
+        `(() => { const g = ${GAME}; const m = window.__mw; return { lives: g.lives, twoHoles: !!g.wall?.spec.mate, figures: m.scene.players, people: m.source.stats().people, x1: m.tracker.state.body?.root.x, x2: m.mate?.state.body?.root.x }; })()`,
+      );
+      expect(info.figures === 2, `场景里应当有两个小人，实际 ${info.figures}`);
+      expect(info.twoHoles, '双人的墙上没有第二个洞');
+      expect(info.people === 2, `双人应当找两个人，实际 ${info.people}`);
+      expect(info.x1 < 0 && info.x2 > 0, `1 号应当在左、2 号在右，实际 x = ${info.x1} / ${info.x2}`);
+      expect(info.lives === 3, `两位都摆对了却掉了命：还剩 ${info.lives} 条`);
+      await page.waitFor(`${GAME}.phase === 'approach' && ${GAME}.progress > 0.6`, 15000);
+    },
+  },
+  {
+    name: 'finale',
+    about: '从第 15 关开始打完四面墙：横幅"恭喜全部通关！"、天色变晚霞、放烟花，演出放完是"全部通关！"的结算',
+    async run({ base, page }) {
+      await page.goto(`${base}/#/play/wall?sim=auto&seed=7&fast=1&level=15&e2e=1`);
+      expect(await page.waitFor(`document.querySelector('.banner--finale')?.textContent.includes('恭喜全部通关！')`, 90000), '没有出现"恭喜全部通关！"的横幅');
+      expect(
+        await page.waitFor(`window.__mw.scene.show.dusk > 0.8 && window.__mw.scene.show.sparks > 50`, 15000),
+        `通关演出没有变天色，或者没放烟花：${JSON.stringify(await page.evaluate('window.__mw.scene.show'))}`,
+      );
+      await page.screenshot(path.join(OUT, 'finale-show.png'));
+      expect(await page.waitFor(`${GAME}?.phase === 'over' && document.querySelector('.panel h2')?.textContent === '全部通关！'`, 30000), '演出放完后没有出现"全部通关！"的结算面板');
+      expect(
+        await page.evaluate(`document.body.textContent.includes('十五关全部拿下，你就是穿墙王者！') && !!${BUTTON('再来一次')} && !${BUTTON('再闯这一关')}`),
+        '通关的结算面板内容不对（应有祝贺语和"再来一次"，不该有"再闯这一关"）',
+      );
+    },
+  },
+  {
+    name: 'retry',
+    about: '从第 3 关开始一直撞墙到没命：点"再闯这一关"，回到第 3 关的开头、三条命，接着出墙',
+    async run({ base, page }) {
+      await page.goto(`${base}/#/play/wall?sim=wrong&fast=1&level=3&e2e=1`);
+      expect(await page.waitFor(`${GAME}?.phase === 'over' && ${BUTTON('再闯这一关')}`, 60000), '没有出现结算和"再闯这一关"');
+      expect((await page.evaluate(`document.querySelector('.panel h2').textContent`)) === '闯到第 3 关', '结算面板的标题不是"闯到第 3 关"');
+      const before = await page.evaluate(`${GAME}.wallIndex`);
+      await mouseClick(page, BUTTON('再闯这一关'), '"再闯这一关"按钮');
+      expect(
+        await page.waitFor(`${GAME}.phase !== 'over' && ${GAME}.lives === 3 && ${GAME}.level === 3 && !document.querySelector('.panel')`, 5000),
+        `点了"再闯这一关"之后没有回到第 3 关的开头：${JSON.stringify(await page.evaluate(`(({ phase, level, lives }) => ({ phase, level, lives }))(${GAME})`))}`,
+      );
+      expect(await page.waitFor(`${GAME}.phase === 'approach' && ${GAME}.wallIndex > ${before} && ${GAME}.wallInLevel === 1`, 15000), '再闯这一关之后没有重新出墙');
+    },
+  },
+  {
+    name: 'duo-cam',
+    about: '假摄像头里并排两个人（真实的识别模型）：双人模式一左一右各认一个，站位引导走完，开局出两个洞的墙',
+    chrome: { fakeVideo: DUO_CAM },
+    async run({ base, page }) {
+      await page.goto(`${base}/#/play/wall?players=2&e2e=1`);
+      const seen = `(() => { const m = window.__mw; const x = (t) => (t?.state.body ? (t.state.body.image[23].x + t.state.body.image[24].x) / 2 : null); return { people: m?.source?.stats().people, a: x(m?.tracker), b: x(m?.mate), x1: m?.tracker?.state.body?.root.x, x2: m?.mate?.state.body?.root.x, text: document.querySelector('.framing__text')?.textContent }; })()`;
+      expect(await page.waitFor(`window.__mw?.tracker?.state.present && window.__mw?.mate?.state.present`, 90000), `两个追踪器没有各认到一个人：${JSON.stringify(await page.evaluate(seen))}`);
+      const got = await page.evaluate(seen);
+      expect(got.people === 2, `双人应当让模型找两个人，实际 ${got.people}`);
+      // 镜像后的画面里：1 号在左半边，2 号在右半边——不是同一个人
+      expect(got.a < 0.5 && got.b > 0.5, `两个追踪器认的不是一左一右的两个人：${JSON.stringify(got)}`);
+      // 舞台上也是：1 号在左（x 为负）、2 号在右——还没开局，站位引导的画面上两个小人就不该叠在一起
+      expect(got.x1 < -0.2 && got.x2 > 0.2, `开局前两个小人没有各站一边：${JSON.stringify(got)}`);
+      expect(await page.waitFor(`${GAME}?.wallIndex >= 1 && !!${GAME}.wall?.spec.mate`, 30000), `站位引导没有走完、没有开局：${JSON.stringify(await page.evaluate(seen))}`);
+      expect((await page.evaluate('window.__mw.scene.players')) === 2, '场景里不是两个小人');
+      await page.waitFor(`${GAME}.progress > 0.5`, 15000);
     },
   },
   {
@@ -144,12 +217,12 @@ const SCENARIOS = [
       await page.goto(`${base}/#/lab?sim=auto&e2e=1`);
       await page.waitFor(`document.querySelector('[data-tab="gallery"]')`, 10000);
       await mouseClick(page, `document.querySelector('[data-tab="gallery"]')`, '"gallery"页签');
-      expect(await page.waitFor(`document.querySelectorAll('.card').length === 30`, 10000), `图鉴应有 30 面墙（1 + 24 + 5），实际 ${await page.evaluate(`document.querySelectorAll('.card').length`)}`);
+      expect(await page.waitFor(`document.querySelectorAll('.card').length === 54`, 10000), `图鉴应有 54 面墙（1 + 48 + 5），实际 ${await page.evaluate(`document.querySelectorAll('.card').length`)}`);
       const painted = await page.evaluate(`[...document.querySelectorAll('.card canvas')].filter((c) => c.getContext('2d').getImageData(150, 20, 1, 1).data[3] === 255).length`);
-      expect(painted === 30, `只有 ${painted} 张缩略图画出来了`);
+      expect(painted === 54, `只有 ${painted} 张缩略图画出来了`);
       const id = await page.evaluate(`document.querySelector('.card[data-wall^="my-"]')?.dataset.wall`);
       expect(id, '图鉴里没有刚存的那面墙');
-      await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 2500, deviceScaleFactor: 1, mobile: false });
+      await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 4400, deviceScaleFactor: 1, mobile: false });
       await sleep(300);
       await page.screenshot(path.join(OUT, 'lab-gallery.png'));
       await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
@@ -292,7 +365,7 @@ const SCENARIOS = [
   },
   {
     name: 'settings',
-    about: '游戏中打开设置、换识别模型：引擎重启 → 关掉设置后停在暂停面板 → 点"继续"重新站位 → 同一局接着玩（命还在）；Esc 只关面板；开"同时识别两个人"也一样生效',
+    about: '游戏中打开设置、换识别模型：引擎重启 → 关掉设置后停在暂停面板 → 点"继续"重新站位 → 同一局接着玩（命还在）；Esc 只关面板；设置里不再有"同时识别两个人"',
     chrome: { fakeVideo: FAKE_CAM },
     async run({ base, page }) {
       await page.goto(`${base}/#/play/wall?e2e=1`);
@@ -346,15 +419,16 @@ const SCENARIOS = [
       await page.key('Escape');
       expect(await page.waitFor(`!${BUTTON('继续')}`, 3000), '没有面板挡着的时候，按 Esc 应当继续游戏');
 
-      // 再从暂停面板进设置，打开"同时识别两个人"
+      // 再从暂停面板进设置：那个"同时识别两个人"的开关已经没有了（找几个人由单人 / 双人模式决定）
       await mouseClick(page, BUTTON('暂停'), '"暂停"按钮');
       expect(await page.waitFor(BUTTON('继续'), 3000), '用鼠标点"暂停"没有反应');
       const inPanel = `[...document.querySelectorAll('.panel button')].find((b) => b.textContent.trim() === '设置')`;
       expect(await page.evaluate(`!!${inPanel}`), '暂停面板上没有"设置"按钮');
       await mouseClick(page, inPanel, '暂停面板上的"设置"按钮');
       expect(await page.waitFor(`document.querySelector('[role="dialog"]')`, 3000), '暂停面板上的"设置"点了没反应');
-      await mouseClick(page, SETTING('同时识别两个人', '开'), '"同时识别两个人"的开关');
-      expect(await page.waitFor(`window.__mw.source?.stats().people === 2 && window.__mw.tracker.state.present`, 60000), '打开"同时识别两个人"之后，引擎没有按两个人重新就绪');
+      expect(await page.evaluate(`document.querySelector('[role="dialog"]').textContent.includes('识别模型')`), '设置面板里没有"识别模型"');
+      expect(!(await page.evaluate(`document.querySelector('[role="dialog"]').textContent.includes('同时识别两个人')`)), '设置面板里还有"同时识别两个人"');
+      expect((await page.evaluate(`window.__mw.source?.stats().people`)) === 1, '单人游戏应当只找一个人');
     },
   },
   {
@@ -653,7 +727,9 @@ async function main() {
   expect(existsSync(path.join(ROOT, 'dist/index.html')), '没有 dist/：去掉 --no-build 再跑一次');
 
   mkdirSync(OUT, { recursive: true });
-  if (scenarios.some((s) => s.chrome?.fakeVideo) && !existsSync(FAKE_CAM)) await makeFakeCam(PHOTO, FAKE_CAM);
+  if (scenarios.some((s) => s.chrome?.fakeVideo === FAKE_CAM) && !existsSync(FAKE_CAM)) await makeFakeCam(PHOTO, FAKE_CAM);
+  // 两个人：放大一些，让每个人在画面里占到一半以上的高度（再小，识别模型就只找得到一个人了）
+  if (scenarios.some((s) => s.chrome?.fakeVideo === DUO_CAM) && !existsSync(DUO_CAM)) await makeFakeCam(PHOTO, DUO_CAM, { people: 2, zoom: 1.3 });
 
   // 服务器用到哪种才起哪种
   const servers = {};

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { NEUTRAL, type PoseSpec } from '../body/pose';
+import { NEUTRAL, poseToSkeleton, type PoseSpec } from '../body/pose';
 import { defaultProfile } from '../body/profile';
-import { SimPoseSource } from '../input/simSource';
+import { jointsToRawPose, SimPoseSource, skeletonToJoints33 } from '../input/simSource';
+import type { RawFrame, RawPose } from '../input/types';
+import { LaneSplit } from '../tracking/lanes';
 import type { MotionEvent } from '../motion/features';
 import { PlayerTracker } from './playerTracker';
 
@@ -197,5 +199,92 @@ describe('PlayerTracker', () => {
     expect(tracker.state.present).toBe(false);
     expect(tracker.state.body).toBeNull();
     expect(tracker.sample(0)).toBeNull();
+  });
+});
+
+describe('PlayerTracker in a lane (two-player mode)', () => {
+  const profile = defaultProfile();
+  const ASPECT = 16 / 9;
+  const person = (x: number): RawPose => {
+    const { joints, vis } = skeletonToJoints33(poseToSkeleton(NEUTRAL, profile, { x }), profile);
+    return jointsToRawPose(joints, vis, { aspect: ASPECT, s: 0.42, groundV: 0.95 });
+  };
+  const both = (t: number): RawFrame => ({ t, aspect: ASPECT, poses: [person(-0.75), person(0.75)] });
+
+  it('calibrate can put the player at a given x instead of 0', () => {
+    const sim = new SimPoseSource({ noise: 0 });
+    const tracker = new PlayerTracker();
+    feed(tracker, sim, 500);
+    const view = tracker.calibrate({ x: 0.75 })!;
+    feed(tracker, sim, 200);
+    expect(tracker.state.body!.root.x).toBeCloseTo(0.75, 2);
+    // 模拟玩家站在画面正中：看得见的范围以他为中心
+    expect((view.left + view.right) / 2).toBeCloseTo(0.75, 2);
+    expect(view.right - view.left).toBeCloseTo(ASPECT / 0.42, 1);
+  });
+
+  it('follows only the person on its side of the line', () => {
+    const split = new LaneSplit();
+    const p1 = new PlayerTracker();
+    const p2 = new PlayerTracker();
+    p1.setLane({ side: 'left', split });
+    p2.setLane({ side: 'right', split });
+    for (let t = 0; t < 600; t += 33) {
+      p1.ingest(both(t));
+      p2.ingest(both(t));
+    }
+    const hipX = (tr: PlayerTracker): number => (tr.state.body!.image[23].x + tr.state.body!.image[24].x) / 2;
+    expect(hipX(p1)).toBeLessThan(0.5); // 镜像后的画面里，1 号在左
+    expect(hipX(p2)).toBeGreaterThan(0.5);
+  });
+
+  it('even before calibration each player is on their own side of the stage, measured from the line between them', () => {
+    // 开局前的站位画面上，两个小人就该一左一右地站着，而不是叠在正中
+    const split = new LaneSplit();
+    const p1 = new PlayerTracker();
+    const p2 = new PlayerTracker();
+    p1.setLane({ side: 'left', split });
+    p2.setLane({ side: 'right', split });
+    for (let t = 0; t < 600; t += 33) {
+      const f = both(t);
+      split.observe(f);
+      p1.ingest(f);
+      p2.ingest(f);
+    }
+    expect(p1.state.body!.root.x).toBeCloseTo(-0.75, 1);
+    expect(p2.state.body!.root.x).toBeCloseTo(0.75, 1);
+
+    // 两个人都站在画面的一侧也一样：以他们中间那条线为准
+    const offside = (t: number): RawFrame => ({ t, aspect: ASPECT, poses: [person(0.3), person(1.7)] });
+    const s2 = new LaneSplit();
+    const q1 = new PlayerTracker();
+    const q2 = new PlayerTracker();
+    q1.setLane({ side: 'left', split: s2 });
+    q2.setLane({ side: 'right', split: s2 });
+    for (let t = 0; t < 1500; t += 33) {
+      const f = offside(t);
+      s2.observe(f);
+      q1.ingest(f);
+      q2.ingest(f);
+    }
+    expect(q1.state.body!.root.x).toBeCloseTo(-0.7, 1);
+    expect(q2.state.body!.root.x).toBeCloseTo(0.7, 1);
+  });
+
+  it('a single player without lanes still starts at x = 0 wherever they stand', () => {
+    const tracker = new PlayerTracker();
+    for (let t = 0; t < 300; t += 33) tracker.ingest({ t, aspect: ASPECT, poses: [person(0.9)] });
+    expect(tracker.state.body!.root.x).toBeCloseTo(0, 1);
+  });
+
+  it('calibrating freezes the dividing line, so it no longer drifts with the players', () => {
+    const split = new LaneSplit();
+    const p1 = new PlayerTracker();
+    p1.setLane({ side: 'left', split });
+    for (let t = 0; t < 300; t += 33) p1.ingest(both(t));
+    expect(split.frozen).toBe(false);
+    p1.calibrate({ x: -0.75 });
+    expect(split.frozen).toBe(true);
+    expect(p1.state.body).not.toBeNull();
   });
 });

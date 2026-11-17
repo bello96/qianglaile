@@ -69,6 +69,8 @@ export class BodyBuilder {
   private readonly outZ = new Float32Array(N);
 
   private homeU: number | null = null;
+  /** 标定位置在舞台上的 x：单人是 0；双人时是这位玩家那条泳道的中心 */
+  private originX = 0;
   private lastTu: number | null = null;
   /** 玩家现在离原点多远（米，没滤波的） */
   private lastOffX = 0;
@@ -87,14 +89,30 @@ export class BodyBuilder {
     return this.homeU !== null;
   }
 
+  /** 髋中心这一帧在画面里的横向位置（没镜像，以画面高度为单位）；还没见过人时是 null。 */
+  get rootU(): number | null {
+    return this.lastTu;
+  }
+
   /**
-   * 把玩家现在站的左右位置记为 x = 0（标定时调用）。
-   * 返回原点挪了多少米：之前量出来的任何 x（包括可见范围的左右边）减去它，就是新坐标。
+   * 标定之前临时用的原点：把画面里横向位置为 u（没镜像，以画面高度为单位）的地方当作 x = 0。
+   * 双人模式在开局前用它——u 取两人中间那条线，于是左边的人 x 为负、右边的人 x 为正，
+   * 两个小人在站位引导的画面上就各站各的一边。（单人不调用：第一次看到人的地方就是 x = 0。）
    */
-  setHome(): number {
-    const shift = this.lastOffX;
+  homeAt(u: number): void {
+    this.homeU = u;
+  }
+
+  /**
+   * 把玩家现在站的左右位置记为 x = originX（标定时调用）。单人不传，就是 x = 0；
+   * 双人时两位各传自己泳道的中心，这样两个人的 Body 直接落在同一个舞台坐标系里，一左一右。
+   * 返回坐标挪了多少米：之前量出来的任何 x（包括可见范围的左右边）减去它，就是新坐标。
+   */
+  setHome(originX = 0): number {
+    const shift = this.lastOffX - originX;
     this.homeU = this.lastTu;
-    this.lastOffX = 0;
+    this.originX = originX;
+    this.lastOffX = originX;
     // 原点变了，滤波器里记着的是旧坐标，清掉重来
     this.xy.reset();
     this.zf.reset();
@@ -105,6 +123,7 @@ export class BodyBuilder {
     // 全身还是半身，是上一次标定时按那时看到的画面定的；重来之后要按新看到的重新定
     this.forceMode = 'auto';
     this.homeU = this.lastTu = null;
+    this.originX = 0;
     this.lastOffX = 0;
     this.legs = this.legsDifferSince = this.lastOffY = null;
     this.scale.reset();
@@ -197,7 +216,7 @@ export class BodyBuilder {
     // ---- 3. 放到舞台上 ----
     this.lastTu = sim.tu;
     if (this.homeU === null) this.homeU = sim.tu;
-    const offX = -(sim.tu - this.homeU) / sim.s;
+    const offX = this.originX - (sim.tu - this.homeU) / sim.s;
     this.lastOffX = offX;
     let offY: number;
     if (mode === 'upper') offY = standHipHeight(profile) - rel.hipC.y;
@@ -225,8 +244,8 @@ export class BodyBuilder {
       root: { ...skeleton.hipC },
       mode,
       view: {
-        left: -(aspect - this.homeU) / sim.s,
-        right: this.homeU / sim.s,
+        left: this.originX - (aspect - this.homeU) / sim.s,
+        right: this.originX + this.homeU / sim.s,
         bottom: -(1 - sim.tv) / sim.s + offY,
         top: sim.tv / sim.s + offY,
       },

@@ -1,5 +1,6 @@
-import { LM } from '../body/landmarks';
 import type { RawFrame, RawPose } from '../input/types';
+import { inLane, type Lane } from './lanes';
+import { describePerson, type PersonInFrame } from './person';
 
 /**
  * 画面里可能不止一个人，而且模型每帧输出的顺序并不固定。
@@ -13,30 +14,32 @@ import type { RawFrame, RawPose } from '../input/types';
  * 为什么需要"锁定"：默认情况下识别模型一次只给一个人（多找一个人每帧要多花十来毫秒）。
  * 它跟丢玩家之后，下一个给出来的可能是旁边路过的人——每帧都只有他一个，光靠"选最近的"拦不住。
  * 锁定之后这样的人不会被当成玩家；游戏那边看到的是"没人"，会暂停，而不是拿旁人的姿势去判撞墙。
+ *
+ * 双人模式下每位玩家各有一个这样的选择器，各管一条泳道（setLane，见 lanes.ts）：
+ * 不在自己泳道里的人，它一概当作不存在——跟人的时候不跟过去，重新选人的时候也不选。
  */
 
 /** 锁定后重新认人的范围：离原位不超过这么多个肩宽（约 1.1 米——洞最远开在离原位 0.9 米处） */
 const HOME_RADIUS = 3;
 
-interface Candidate {
-  pose: RawPose;
-  /** 肩髋质心在画面里的位置，以画面高度为单位 */
-  u: number;
-  v: number;
-  /** 肩宽，以画面高度为单位 */
-  size: number;
-}
+type Candidate = PersonInFrame;
 
 export class PersonSelector {
   private readonly maxJump: number;
   private readonly lostMs: number;
   private last: { u: number; v: number; t: number; size: number } | null = null;
   private home: { u: number; size: number } | null = null;
+  private lane: Lane | null = null;
 
   constructor(opts: { maxJump?: number; lostMs?: number } = {}) {
     // 相邻两帧之间，同一个人的质心最多移动多少（以画面高度为单位）
     this.maxJump = opts.maxJump ?? 0.25;
     this.lostMs = opts.lostMs ?? 500;
+  }
+
+  /** 只认这条泳道里的人（双人模式）；null = 不分泳道（单人）。 */
+  setLane(lane: Lane | null): void {
+    this.lane = lane;
   }
 
   /** 锁定：记住玩家现在站的位置（标定时调用）。还没见过人时什么也不做。 */
@@ -49,7 +52,10 @@ export class PersonSelector {
   }
 
   pick(frame: RawFrame): RawPose | null {
-    const candidates = frame.poses.map((pose) => describe(pose, frame.aspect)).filter((c) => c !== null);
+    const lane = this.lane;
+    const candidates = frame.poses
+      .map((pose) => describePerson(pose, frame.aspect))
+      .filter((c): c is Candidate => c !== null && (!lane || inLane(lane, c.u / frame.aspect)));
 
     if (this.last) {
       let best: Candidate | null = null;
@@ -90,22 +96,4 @@ export class PersonSelector {
     this.last = null;
     this.home = null;
   }
-}
-
-/** 一个人在画面里的位置（肩髋质心）和大小（肩宽）；双肩看不清的不算数。 */
-function describe(pose: RawPose, aspect: number): Candidate | null {
-  const ls = pose.image[LM.leftShoulder];
-  const rs = pose.image[LM.rightShoulder];
-  if (ls.v < 0.5 || rs.v < 0.5) return null;
-  let u = 0;
-  let v = 0;
-  let n = 0;
-  for (const i of [LM.leftShoulder, LM.rightShoulder, LM.leftHip, LM.rightHip]) {
-    const p = pose.image[i];
-    if (p.v < 0.5) continue;
-    u += p.x * aspect;
-    v += p.y;
-    n++;
-  }
-  return { pose, u: u / n, v: v / n, size: Math.hypot((ls.x - rs.x) * aspect, ls.y - rs.y) };
 }

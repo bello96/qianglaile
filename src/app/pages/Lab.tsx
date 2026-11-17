@@ -34,7 +34,6 @@ export function Lab() {
     seed: flags.seed,
     model: settings.model,
     cameraId: settings.cameraId,
-    people: settings.twoPeople ? 2 : 1,
     expose: flags.e2e || import.meta.env.DEV,
     worker: flags.worker,
   });

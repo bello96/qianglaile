@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CameraError } from '../engine/camera/camera';
+import { NEUTRAL } from '../engine/body/pose';
 import type { Recording } from '../engine/input/recorder';
 import { SimPoseSource } from '../engine/input/simSource';
 import type { PoseSource, RawFrame } from '../engine/input/types';
@@ -49,6 +50,7 @@ function rig(stored: string | null = null, over: Partial<EngineDeps> = {}) {
   let clock = 0;
   const timeouts: { fn: () => void; ms: number; cancelled: boolean }[] = [];
   const people = new SimPoseSource({ noise: 0 });
+  const pair = new SimPoseSource({ noise: 0, people: 2 });
 
   const make = (kind: PoseSource['kind']) => (opts: object) => {
     const s = fakeSource(kind, opts as Record<string, unknown>);
@@ -82,6 +84,8 @@ function rig(stored: string | null = null, over: Partial<EngineDeps> = {}) {
     tick: (ms: number) => (clock += ms),
     /** 一帧里有一个站着的人 */
     frame: (): RawFrame => people.step(33),
+    /** 一帧里有两个并排站着的人 */
+    duoFrame: (): RawFrame => pair.step(33),
     /** 让最新的那个来源启动成功，并等状态更新完 */
     async up(): Promise<Fake> {
       const s = sources[sources.length - 1];
@@ -286,7 +290,7 @@ describe('EngineController: restarting', () => {
 
     const sim = rig();
     sim.engine.configure(config({ sim: 'auto', seed: 3 }));
-    sim.engine.configure(config({ sim: 'wrong', seed: 3, model: 'lite', cameraId: 'x', people: 2 })); // 这些只对摄像头有意义
+    sim.engine.configure(config({ sim: 'wrong', seed: 3, model: 'lite', cameraId: 'x' })); // 这些只对摄像头有意义
     expect(sim.sources).toHaveLength(1);
   });
 
@@ -519,5 +523,59 @@ describe('EngineController: other sources', () => {
     expect(demo.engine.snapshot.kind).toBe('replay');
     demo.engine.configure(config({ replay: null }));
     expect(demo.engine.snapshot.kind).toBe('sim');
+  });
+});
+
+describe('EngineController: two players', () => {
+  const hipX = (tracker: { state: { body: { image: { x: number }[] } | null } }): number => (tracker.state.body!.image[23].x + tracker.state.body!.image[24].x) / 2;
+
+  it('asks the camera for two poses and gives each player a tracker of their own, left and right', async () => {
+    const r = rig();
+    r.engine.configure(config({ people: 2 }));
+    expect(r.last().made).toMatchObject({ numPoses: 2 });
+    const s = await r.up();
+    for (let i = 0; i < 20; i++) s.emit(r.duoFrame());
+    expect(r.engine.tracker.state.present).toBe(true);
+    expect(r.engine.mate.state.present).toBe(true);
+    // 镜像后的画面里：1 号在左，2 号在右
+    expect(hipX(r.engine.tracker)).toBeLessThan(0.5);
+    expect(hipX(r.engine.mate)).toBeGreaterThan(0.5);
+  });
+
+  it('in single-player mode the second tracker is left alone, and the first sees everyone as before', async () => {
+    const r = rig();
+    r.engine.configure(config());
+    const s = await r.up();
+    for (let i = 0; i < 20; i++) s.emit(r.duoFrame());
+    expect(r.engine.tracker.state.present).toBe(true);
+    expect(r.engine.mate.state.present).toBe(false);
+    expect(r.engine.mate.state.body).toBeNull();
+  });
+
+  it('tells the simulated players how many of them there are', () => {
+    const r = rig();
+    r.engine.configure(config({ sim: 'auto', seed: 4, people: 2 }));
+    expect(r.last().made).toEqual({ seed: 4, people: 2 });
+    const solo = rig();
+    solo.engine.configure(config({ sim: 'auto', seed: 4 }));
+    expect(solo.last().made).toEqual({ seed: 4, people: 1 });
+  });
+
+  it('changing the number of players restarts the engine whatever the source, and forgets where the dividing line was', async () => {
+    const r = rig();
+    r.engine.configure(config({ sim: 'auto', people: 2 }));
+    const s = await r.up();
+    // 两个人都站在画面的一侧：分界线跟过去
+    const skewed = new SimPoseSource({ noise: 0, people: 2, cam: { aspect: 16 / 9, s: 0.3, groundV: 0.95 } });
+    skewed.setPose(NEUTRAL, { x: 0.2 }, 0, 0);
+    skewed.setPose(NEUTRAL, { x: 1.6 }, 0, 1);
+    for (let i = 0; i < 30; i++) s.emit(skewed.step(33));
+    expect(r.engine.split.value).toBeLessThan(0.4);
+
+    r.engine.configure(config({ sim: 'auto', people: 1 }));
+    expect(r.sources).toHaveLength(2);
+    expect(s.stopped).toBe(1);
+    expect(r.engine.split.value).toBe(0.5);
+    expect(r.engine.mate.state.present).toBe(false);
   });
 });

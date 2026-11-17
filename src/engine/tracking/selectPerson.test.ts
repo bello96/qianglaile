@@ -3,6 +3,7 @@ import { NEUTRAL, poseToSkeleton } from '../body/pose';
 import { defaultProfile } from '../body/profile';
 import { jointsToRawPose, skeletonToJoints33 } from '../input/simSource';
 import type { RawFrame, RawPose } from '../input/types';
+import { LaneSplit } from './lanes';
 import { PersonSelector } from './selectPerson';
 
 const profile = defaultProfile();
@@ -139,5 +140,74 @@ describe('PersonSelector', () => {
     for (const l of ghost.image) l.v = 0.1;
     const real = person(1.0, 0.3);
     expect(new PersonSelector().pick(frame(0, ghost, real))).toBe(real);
+  });
+});
+
+describe('PersonSelector with a lane (two players, one selector each)', () => {
+  const lane = (side: 'left' | 'right', split = new LaneSplit()): PersonSelector => {
+    const sel = new PersonSelector();
+    sel.setLane({ side, split });
+    return sel;
+  };
+  // 舞台上 x 为负的人站在屏幕左边
+  const onLeft = (x = -0.75): RawPose => person(x);
+  const onRight = (x = 0.75): RawPose => person(x);
+
+  it('each selector only ever sees the person on its own side', () => {
+    const a = onLeft();
+    const b = onRight();
+    expect(lane('left').pick(frame(0, b, a))).toBe(a);
+    expect(lane('right').pick(frame(0, a, b))).toBe(b);
+  });
+
+  it('does not grab the other player when its own player goes missing', () => {
+    const left = lane('left');
+    const a = onLeft();
+    expect(left.pick(frame(0, a, onRight()))).toBe(a);
+    for (let t = 33; t < 2500; t += 33) expect(left.pick(frame(t, onRight())), `t=${t}`).toBeNull();
+  });
+
+  it('loses a player who wanders across the line: it does not follow them into the other lane, and the other selector does not take them', () => {
+    const split = new LaneSplit();
+    const left = lane('left', split);
+    const right = lane('right', split);
+    let t = 0;
+    const a = onLeft();
+    expect(left.pick(frame(t, a, onRight()))).toBe(a);
+    expect(right.pick(frame(t, a, onRight()))).not.toBeNull();
+    // 右边那位一步步走到左半边
+    for (let x = 0.7; x >= -0.3; x -= 0.05) {
+      t += 33;
+      const f = frame(t, a, onRight(x));
+      expect(left.pick(f), `x=${x.toFixed(2)}`).toBe(a);
+      const got = right.pick(f);
+      if (x < -0.05) expect(got, `x=${x.toFixed(2)}`).toBeNull();
+    }
+    // 他走回自己那边，过一会儿又被认回来
+    let back: RawPose | null = null;
+    for (let i = 0; i < 30; i++) back = right.pick(frame((t += 33), a, onRight(0.6)));
+    expect(back).not.toBeNull();
+    expect(back).not.toBe(a);
+  });
+
+  it('a bystander who steps into an emptied lane is not taken for its player once the lane is locked', () => {
+    const right = lane('right');
+    let t = 0;
+    for (; t < 300; t += 33) right.pick(frame(t, onRight()));
+    right.lock();
+    for (; t < 1500; t += 33) right.pick(frame(t)); // 他走了
+    // 旁人站在这条泳道里，但离原位很远
+    expect(right.pick(frame((t += 33), person(2.0)))).toBeNull();
+    // 本人回到原位
+    const back = onRight();
+    expect(right.pick(frame((t += 33), back))).toBe(back);
+  });
+
+  it('taking the lane away again gives back the single-player behaviour', () => {
+    const sel = lane('left');
+    const b = onRight();
+    expect(sel.pick(frame(0, b))).toBeNull();
+    sel.setLane(null);
+    expect(sel.pick(frame(33, b))).toBe(b);
   });
 });

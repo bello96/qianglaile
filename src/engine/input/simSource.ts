@@ -108,6 +108,21 @@ export interface SimOptions {
   fps?: number;
   /** false：腿不可见（模拟坐在桌前） */
   legs?: boolean;
+  /** 模拟几个人，默认 1。2 = 双人模式：0 号站在屏幕左边，1 号站在右边 */
+  people?: 1 | 2;
+  /** 两个人隔多远（米），默认 1.5 */
+  gap?: number;
+}
+
+/** 一个模拟出来的人：正从 from 过渡到 to。 */
+interface Actor {
+  /** 他平时站的位置（舞台 x） */
+  homeX: number;
+  from: Skeleton;
+  to: Skeleton;
+  blend: number;
+  blendDur: number;
+  present: boolean;
 }
 
 export class SimPoseSource implements PoseSource {
@@ -122,12 +137,8 @@ export class SimPoseSource implements PoseSource {
   private readonly rng: Rng;
   private readonly frames = new Emitter<RawFrame>();
 
-  private from: Skeleton;
-  private to: Skeleton;
-  private blend = 1;
-  private blendDur = 0;
+  private readonly actors: Actor[];
   private lift = 0;
-  private present = true;
   private t = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
 
@@ -138,19 +149,30 @@ export class SimPoseSource implements PoseSource {
     this.fps = opts.fps ?? 30;
     this.legs = opts.legs ?? true;
     this.rng = createRng(opts.seed ?? 1);
-    this.from = this.to = poseToSkeleton(NEUTRAL, this.profile);
+    const gap = opts.gap ?? 1.5;
+    // 一个人站在正中；两个人一左一右（0 号在舞台 x 为负的那边，也就是屏幕左边）
+    const homes = opts.people === 2 ? [-gap / 2, gap / 2] : [0];
+    this.actors = homes.map((homeX) => {
+      const standing = poseToSkeleton(NEUTRAL, this.profile, { x: homeX });
+      return { homeX, from: standing, to: standing, blend: 1, blendDur: 0, present: true };
+    });
   }
 
-  private current(): Skeleton {
-    return this.blend >= 1 ? this.to : lerpSkeleton(this.from, this.to, smoothstep(this.blend));
+  private current(a: Actor): Skeleton {
+    return a.blend >= 1 ? a.to : lerpSkeleton(a.from, a.to, smoothstep(a.blend));
   }
 
-  /** 摆一个姿势；blendSec 秒内从当前姿势平滑过渡过去。 */
-  setPose(spec: PoseSpec, at: { x?: number } = {}, blendSec = 0.25): void {
-    this.from = this.current();
-    this.to = poseToSkeleton(spec, this.profile, at);
-    this.blendDur = Math.max(0, blendSec);
-    this.blend = this.blendDur > 0 ? 0 : 1;
+  /**
+   * 摆一个姿势；blendSec 秒内从当前姿势平滑过渡过去。
+   * at.x 是舞台坐标（不给就回到他平时站的位置）；who 是第几个人（双人时 0 / 1）。
+   */
+  setPose(spec: PoseSpec, at: { x?: number } = {}, blendSec = 0.25, who: 0 | 1 = 0): void {
+    const a = this.actors[who];
+    if (!a) return;
+    a.from = this.current(a);
+    a.to = poseToSkeleton(spec, this.profile, { x: at.x ?? a.homeX });
+    a.blendDur = Math.max(0, blendSec);
+    a.blend = a.blendDur > 0 ? 0 : 1;
   }
 
   /** 整个人离地多少米（模拟跳起）。 */
@@ -158,18 +180,21 @@ export class SimPoseSource implements PoseSource {
     this.lift = metres;
   }
 
-  setPresent(on: boolean): void {
-    this.present = on;
+  /** 走出 / 回到画面。不说是谁（who）就是所有人。 */
+  setPresent(on: boolean, who?: 0 | 1): void {
+    this.actors.forEach((a, i) => {
+      if (who === undefined || who === i) a.present = on;
+    });
   }
 
   /** 推进 dtMs 毫秒并产出一帧。测试里手动调用；start() 之后由定时器调用。 */
   step(dtMs: number): RawFrame {
     this.t += dtMs;
-    if (this.blend < 1) this.blend = Math.min(1, this.blend + dtMs / 1000 / this.blendDur);
-
     const poses: RawPose[] = [];
-    if (this.present) {
-      const { joints, vis } = skeletonToJoints33(this.current(), this.profile);
+    for (const a of this.actors) {
+      if (a.blend < 1) a.blend = Math.min(1, a.blend + dtMs / 1000 / a.blendDur);
+      if (!a.present) continue;
+      const { joints, vis } = skeletonToJoints33(this.current(a), this.profile);
       for (const j of joints) {
         j.x += this.noise * this.rng.gauss();
         j.y += this.noise * this.rng.gauss() + this.lift;
@@ -199,6 +224,6 @@ export class SimPoseSource implements PoseSource {
   }
 
   stats(): SourceStats {
-    return { fps: this.fps, detectMs: 0, delegate: 'sim', model: 'sim' };
+    return { fps: this.fps, detectMs: 0, delegate: 'sim', model: 'sim', people: this.actors.length };
   }
 }

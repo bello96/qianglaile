@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SimPoseSource } from '../../engine/input/simSource';
 import { STALE_MS, type PoseSource } from '../../engine/input/types';
 import { PlayerTracker } from '../../engine/player/playerTracker';
+import { LaneSplit } from '../../engine/tracking/lanes';
 import type { GameEvent } from './game';
 import { POSES, STAND } from './poses';
 import { WallSession, type SessionEngine, type SessionEvent } from './session';
@@ -30,7 +31,7 @@ interface Rig {
  * kind 'camera'：把模拟玩家当成"摄像头前的真人"——会话不会替他摆姿势，由这里的 player 策略来摆。
  * kind 'sim'：演示模式，会话自己让模拟玩家照着墙摆。
  */
-function rig(opts: { kind?: 'camera' | 'sim'; sim?: 'off' | 'auto' | 'wrong' | 'manual'; pool?: boolean; player?: 'perfect' | 'lazy'; speed?: number } = {}): Rig {
+function rig(opts: { kind?: 'camera' | 'sim'; sim?: 'off' | 'auto' | 'wrong' | 'manual'; pool?: boolean; player?: 'perfect' | 'lazy'; speed?: number; startLevel?: number } = {}): Rig {
   const tracker = new PlayerTracker();
   let now = 0;
   let lastFrame = -Infinity;
@@ -49,7 +50,7 @@ function rig(opts: { kind?: 'camera' | 'sim'; sim?: 'off' | 'auto' | 'wrong' | '
   sim = plug(5);
 
   const engine: Rig['engine'] = { status: 'ready', source: sim, kind: opts.kind ?? 'camera', tracker, sinceFrame: (t = now) => t - lastFrame };
-  const session = new WallSession({ seed: 7, sim: opts.sim ?? 'off', difficulty: () => 'normal' });
+  const session = new WallSession({ seed: 7, sim: opts.sim ?? 'off', difficulty: () => 'normal', startLevel: opts.startLevel });
   if (opts.pool !== false) session.setPool(POOL);
 
   const self: Rig = {
@@ -179,6 +180,48 @@ describe('WallSession: the simulated player', () => {
     expect(r.session.stage).toBe('framing');
     expect(r.log).toEqual([]);
   });
+
+  it('"retry this level" after running out of lives carries on in the same game, on the same calibration, with three lives', () => {
+    const r = rig({ kind: 'sim', sim: 'wrong' }).run((x) => x.session.stage === 'over', 120);
+    const game = r.session.game;
+    const calibration = r.session.ctx;
+    r.session.retryLevel();
+    r.advance(0.1);
+    expect(r.session.stage).toBe('playing');
+    expect(r.session.game).toBe(game);
+    expect(r.session.game!.state).toMatchObject({ lives: COMMON.lives, phase: 'countdown', level: 1 });
+    expect(r.session.ctx).toBe(calibration);
+    expect(begins(r)).toHaveLength(2);
+    expect(begins(r)[1].resumed).toBe(false);
+    // 接着真的出墙
+    r.run((x) => x.count('wall') === 4, 20);
+    expect(r.count('wall')).toBe(4);
+  });
+
+  it('"retry this level" does nothing before a round, during a round, or twice in a row', () => {
+    const idle = rig({ pool: false });
+    idle.session.retryLevel();
+    idle.advance(0.2);
+    expect(idle.log).toEqual([]);
+
+    const mid = rig({ kind: 'sim' }).run((x) => outcomes(x).length === 1, 40);
+    const score = mid.session.game!.state.score;
+    mid.session.retryLevel();
+    mid.advance(0.1);
+    expect(begins(mid)).toHaveLength(1);
+    expect(mid.session.game!.state.score).toBe(score);
+
+    const twice = rig({ kind: 'sim', sim: 'wrong' }).run((x) => x.session.stage === 'over', 120);
+    twice.session.retryLevel();
+    twice.session.retryLevel();
+    twice.advance(0.1);
+    expect(begins(twice)).toHaveLength(2);
+  });
+
+  it('can be told to start at a later level', () => {
+    const r = rig({ kind: 'sim', startLevel: 15 }).run((x) => x.count('wall') === 1, 20);
+    expect(r.session.game!.state.level).toBe(15);
+  });
 });
 
 describe('WallSession: when the picture is not trustworthy', () => {
@@ -300,7 +343,8 @@ describe('WallSession: the engine restarts in the middle of a round', () => {
     expect(r.session.ctx!.mode).toBe('full');
     r.restart({ legs: false }); // 换的那个摄像头只照得到上半身
     r.advance(0.9);
-    expect(r.session.framing.text).toContain('半身');
+    expect(r.session.framing.text).toContain('让脚也进画面');
+    expect(r.session.framing.advisory).toBe(true);
     r.run(playing, 12);
     expect(begins(r)[1].ctx.mode).toBe('upper');
 
@@ -341,5 +385,124 @@ describe('WallSession: odds and ends', () => {
     const fast = rig({ speed: 3 }).run(playing, 5).advance(5);
     expect(normal.count('outcome')).toBe(0);
     expect(fast.count('outcome')).toBeGreaterThanOrEqual(1);
+  });
+});
+
+/** 双人：两个模拟玩家隔 1.5 米并排，引擎里两条泳道各一个追踪器。kind / player 的意思和上面的 rig 一样。 */
+function duoRig(opts: { kind?: 'camera' | 'sim'; player?: 'perfect' | 'lazy'; players?: 1 | 2 } = {}) {
+  const split = new LaneSplit();
+  const tracker = new PlayerTracker();
+  const mate = new PlayerTracker();
+  tracker.setLane({ side: 'left', split });
+  mate.setLane({ side: 'right', split });
+  const sim = new SimPoseSource({ seed: 5, noise: 0.006, people: 2 });
+  let now = 0;
+  let lastFrame = -Infinity;
+  let tick = 0;
+  sim.onFrame((f) => {
+    split.observe(f);
+    mate.ingest(f);
+    tracker.ingest(f);
+    lastFrame = now;
+  });
+  const kind = opts.kind ?? 'sim';
+  const engine: SessionEngine = { status: 'ready', source: sim, kind, tracker, mate, sinceFrame: (t = now) => t - lastFrame };
+  const session = new WallSession({ seed: 7, sim: 'off', difficulty: () => 'normal', players: opts.players ?? 2 });
+  session.setPool(POOL);
+  const log: SessionEvent[] = [];
+  const self = {
+    session,
+    sim,
+    tracker,
+    mate,
+    split,
+    log,
+    run(stop: () => boolean, maxSec = 120) {
+      for (let t = 0; t < maxSec && !stop(); t += STEP) {
+        now += 1000 / 60;
+        if (tick++ % 2 === 0) sim.step(1000 / 30);
+        for (const e of session.update(now, STEP, engine)) {
+          log.push(e);
+          if (e.type === 'wall' && kind === 'camera' && (opts.player ?? 'perfect') === 'perfect') {
+            const spec = e.wall.spec;
+            sim.setPose(spec.pose ?? spec.shape!.demo, { x: spec.holeX }, 0.4, 0);
+            if (spec.mate) sim.setPose(spec.mate.pose ?? spec.mate.shape!.demo, { x: spec.mate.holeX }, 0.4, 1);
+          }
+        }
+      }
+      return self;
+    },
+    advance(sec: number) {
+      let left = sec;
+      return self.run(() => (left -= STEP) < 0, sec + 1);
+    },
+    outcomes: () => log.filter((e): e is Extract<GameEvent, { type: 'outcome' }> => e.type === 'outcome'),
+    begins: () => log.filter((e): e is Extract<SessionEvent, { type: 'begin' }> => e.type === 'begin'),
+  };
+  return self;
+}
+
+describe('WallSession: two players', () => {
+  it('in demo mode the two simulated players start at once, each calibrated to their own side, and play together', () => {
+    const r = duoRig();
+    r.run(() => r.session.stage === 'playing', 4);
+    expect(r.session.stage).toBe('playing');
+    const ctx = r.session.ctx!;
+    expect(ctx.mate).toBeDefined();
+    expect(ctx.gap!).toBeCloseTo(1.5, 1);
+    expect(r.split.frozen).toBe(true);
+    r.advance(0.3);
+    expect(r.tracker.state.body!.root.x).toBeCloseTo(-0.75, 1);
+    expect(r.mate.state.body!.root.x).toBeCloseTo(0.75, 1);
+    // 标定返回的可见范围，两位用的是同一个舞台坐标系
+    expect(ctx.view!.left).toBeCloseTo(ctx.mate!.view!.left, 1);
+
+    r.run(() => r.outcomes().length === 5, 80);
+    expect(r.outcomes().map((o) => o.outcome.kind)).toEqual(Array(5).fill('pass'));
+    expect(r.outcomes().every((o) => o.wall.spec.mate !== undefined)).toBe(true);
+    expect(r.session.game!.summary.players).toBe(2);
+  });
+
+  it('real players: waits until both are in view and standing still, then starts', () => {
+    const r = duoRig({ kind: 'camera' });
+    r.sim.setPresent(false, 1);
+    r.advance(4);
+    expect(r.session.stage).toBe('framing');
+    expect(r.session.framing.text).toBe('还差一位，站到旁边来');
+    r.sim.setPresent(true, 1);
+    r.run(() => r.session.stage === 'playing', 6);
+    expect(r.session.stage).toBe('playing');
+    expect(r.begins()[0].ctx.mate).toBeDefined();
+    r.run(() => r.outcomes().length === 3, 60);
+    expect(r.outcomes().map((o) => o.outcome.kind)).toEqual(['pass', 'pass', 'pass']);
+  });
+
+  it('clamps the distance between the two little figures to what the stage allows', () => {
+    const wide = duoRig();
+    // 把两个人挪到 2.4 米开外再开局
+    wide.sim.setPose(STAND, { x: -1.2 }, 0, 0);
+    wide.sim.setPose(STAND, { x: 1.2 }, 0, 1);
+    wide.run(() => wide.session.stage === 'playing', 4);
+    expect(wide.session.ctx!.gap).toBe(COMMON.duo.maxGap);
+    wide.advance(0.3);
+    expect(wide.tracker.state.body!.root.x).toBeCloseTo(-COMMON.duo.maxGap / 2, 1);
+  });
+
+  it('when the round is over both are free to walk off; "retry" and "again" pin both to their spots again', () => {
+    const r = duoRig({ kind: 'camera', player: 'lazy' });
+    r.run(() => r.session.stage === 'over', 120);
+    expect(r.session.stage).toBe('over');
+    expect(r.session.game!.summary.players).toBe(2);
+    r.session.retryLevel();
+    r.advance(0.1);
+    expect(r.session.stage).toBe('playing');
+    expect(r.session.game!.state.lives).toBe(COMMON.lives);
+  });
+
+  it('a single-player session takes no notice of a second tracker', () => {
+    const r = duoRig({ players: 1 });
+    r.run(() => r.session.stage === 'playing', 4);
+    expect(r.session.ctx!.mate).toBeUndefined();
+    expect(r.session.ctx!.gap).toBeUndefined();
   });
 });
